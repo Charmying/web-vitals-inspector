@@ -3,6 +3,7 @@ import puppeteer, { type Browser, type Page } from 'puppeteer'
 import axios from 'axios'
 import { resolve as urlResolve } from 'url'
 import type { CrawlProgress, CrawlResult, UrlStatusEntry } from './types'
+import { getChromePath } from './chrome'
 
 /** File extension and path patterns to exclude from SEO crawling */
 const EXCLUDE_EXTENSIONS = /\.(pdf|jpg|jpeg|png|gif|svg|webp|avif|ico|css|js|woff|woff2|ttf|eot|mp4|mp3|zip|rar|doc|docx|xls|xlsx|ppt|pptx|exe|dmg|apk)$/i
@@ -343,6 +344,7 @@ export async function crawlUrls(rootUrl: string, onProgress: (p: CrawlProgress) 
 
   const browser = await puppeteer.launch({
     headless: true,
+    executablePath: getChromePath() || undefined,
     args: [
       '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
       '--disable-gpu', '--mute-audio', '--hide-scrollbars'

@@ -2,6 +2,16 @@ appId: com.electron.app
 productName: Web Vitals Inspector
 directories:
   buildResources: build
+# Disable asar so that node_modules/.bin/lighthouse.cmd can be spawned as a
+# real subprocess and Lighthouse can require() its own modules at runtime.
+asar: false
+# Bundle the project-local Chromium download (.puppeteer-cache/) into the app.
+# After cloning, run `npm install` once so Puppeteer downloads Chrome there.
+extraResources:
+  - from: .puppeteer-cache
+    to: puppeteer-cache
+    filter:
+      - '**/*'
 files:
   - '!**/.vscode/*'
   - '!src/*'
@@ -9,8 +19,7 @@ files:
   - '!{.eslintcache,eslint.config.mjs,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
-asarUnpack:
-  - resources/**
+  - '!.puppeteer-cache/**'
 win:
   executableName: web-vitals-inspector
 nsis:

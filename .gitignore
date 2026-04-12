@@ -4,3 +4,5 @@ out
 .DS_Store
 .eslintcache
 *.log*
+# Puppeteer-managed Chromium download (bundled into packaged app via extraResources)
+.puppeteer-cache/

@@ -7,6 +7,7 @@ import http from 'http'
 import { spawn } from 'child_process'
 import puppeteer from 'puppeteer'
 import type { AnalysisProgress, AnalysisResult, LhrSlim, SeoMeta, TechChecks } from './types'
+import { getChromePath } from './chrome'
 
 const LH_RETRY = 2
 const PAGE_TIMEOUT = 60000
@@ -15,16 +16,18 @@ const LH_TIMEOUT = 300000
 /** Resolve the Lighthouse CLI binary path across different environments */
 function getLighthouseBin(): string {
   const binName = process.platform === 'win32' ? 'lighthouse.cmd' : 'lighthouse'
-  // Try multiple possible locations
+  // Try multiple possible locations (dev, electron-vite dist, packaged app with asar: false)
   const candidates = [
     path.resolve(process.cwd(), 'node_modules', '.bin', binName),
     path.resolve(__dirname, '..', '..', '..', 'node_modules', '.bin', binName),
-    path.resolve(__dirname, '..', '..', 'node_modules', '.bin', binName)
+    path.resolve(__dirname, '..', '..', 'node_modules', '.bin', binName),
+    // Packaged app (asar: false): node_modules lives at resources/app/node_modules
+    path.join(process.resourcesPath ?? '', 'app', 'node_modules', '.bin', binName)
   ]
   for (const c of candidates) {
     if (fs.existsSync(c)) return c
   }
-  return candidates[0] // fallback
+  return candidates[1] // fallback
 }
 
 /** Extract a slim subset of Lighthouse report data (categories + audits) */
@@ -54,6 +57,7 @@ function extractLhrSlim(lhr: Record<string, unknown>): LhrSlim | null {
 /** Run Lighthouse audit via CLI subprocess with retry logic */
 async function runLighthouse(url: string): Promise<Record<string, unknown> | null> {
   const lighthouseBin = getLighthouseBin()
+  const chromePath = getChromePath()
 
   for (let attempt = 1; attempt <= LH_RETRY; attempt++) {
     const tmpJson = path.join(
@@ -74,7 +78,8 @@ async function runLighthouse(url: string): Promise<Record<string, unknown> | nul
         const child = spawn(lighthouseBin, args, {
           shell: process.platform === 'win32',
           cwd: os.tmpdir(),
-          stdio: ['ignore', 'pipe', 'pipe']
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, ...(chromePath ? { CHROME_PATH: chromePath } : {}) }
         })
         let errBuf = ''
         const timer = setTimeout(() => {
@@ -248,8 +253,10 @@ export async function analyzeUrls(urls: string[], onProgress: (p: AnalysisProgre
   const allResults: AnalysisResult[] = []
   const pct = (v: number | null | undefined): string => v != null ? String(Math.round(v * 100)) : 'N/A'
 
+  const chromePath = getChromePath()
   const sharedBrowser = await puppeteer.launch({
     headless: true,
+    executablePath: chromePath || undefined,
     args: [
       '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu',
       '--mute-audio', '--hide-scrollbars'
