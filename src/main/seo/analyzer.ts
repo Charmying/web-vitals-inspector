@@ -1,34 +1,14 @@
 /** SEO analyzer module — runs Lighthouse audits and Puppeteer-based metadata extraction */
-import fs from 'fs'
-import path from 'path'
-import os from 'os'
 import https from 'https'
 import http from 'http'
-import { spawn } from 'child_process'
 import puppeteer from 'puppeteer'
+import type lighthouse from 'lighthouse'
 import type { AnalysisProgress, AnalysisResult, LhrSlim, SeoMeta, TechChecks } from './types'
 import { getChromePath } from './chrome'
 
 const LH_RETRY = 2
 const PAGE_TIMEOUT = 60000
 const LH_TIMEOUT = 300000
-
-/** Resolve the Lighthouse CLI binary path across different environments */
-function getLighthouseBin(): string {
-  const binName = process.platform === 'win32' ? 'lighthouse.cmd' : 'lighthouse'
-  // Try multiple possible locations (dev, electron-vite dist, packaged app with asar: false)
-  const candidates = [
-    path.resolve(process.cwd(), 'node_modules', '.bin', binName),
-    path.resolve(__dirname, '..', '..', '..', 'node_modules', '.bin', binName),
-    path.resolve(__dirname, '..', '..', 'node_modules', '.bin', binName),
-    // Packaged app (asar: false): node_modules lives at resources/app/node_modules
-    path.join(process.resourcesPath ?? '', 'app', 'node_modules', '.bin', binName)
-  ]
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return c
-  }
-  return candidates[1] // fallback
-}
 
 /** Extract a slim subset of Lighthouse report data (categories + audits) */
 function extractLhrSlim(lhr: Record<string, unknown>): LhrSlim | null {
@@ -54,73 +34,60 @@ function extractLhrSlim(lhr: Record<string, unknown>): LhrSlim | null {
   return slim
 }
 
-/** Run Lighthouse audit via CLI subprocess with retry logic */
+/** Run Lighthouse audit programmatically with retry logic.
+ *
+ * Lighthouse 13+ is ESM-only. Since `lighthouse` is declared external in
+ * electron.vite.config.ts it is NOT bundled — `import('lighthouse')` resolves
+ * from node_modules at runtime via Electron's Node.js, which supports ESM
+ * dynamic imports from a CJS context.
+ *
+ * This replaces the previous CLI subprocess approach which required `node` to
+ * be present in the system PATH — causing silent failures on machines that do
+ * not have a standalone Node.js installation.
+ */
 async function runLighthouse(url: string): Promise<Record<string, unknown> | null> {
-  const lighthouseBin = getLighthouseBin()
   const chromePath = getChromePath()
 
   for (let attempt = 1; attempt <= LH_RETRY; attempt++) {
-    const tmpJson = path.join(
-      os.tmpdir(),
-      `._lh_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2)}.json`
-    )
+    let browser: import('puppeteer').Browser | null = null
     try {
-      const args = [
-        url,
-        '--quiet',
-        '--output=json',
-        `--output-path=${tmpJson}`,
-        '--only-categories=performance,accessibility,best-practices,seo',
-        '--chrome-flags=--headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --disable-extensions --mute-audio --hide-scrollbars'
-      ]
-
-      await new Promise<string>((resolve, reject) => {
-        const child = spawn(lighthouseBin, args, {
-          shell: process.platform === 'win32',
-          cwd: os.tmpdir(),
-          stdio: ['ignore', 'pipe', 'pipe'],
-          env: { ...process.env, ...(chromePath ? { CHROME_PATH: chromePath } : {}) }
-        })
-        let errBuf = ''
-        const timer = setTimeout(() => {
-          child.kill('SIGTERM')
-          reject(new Error(`Lighthouse timeout (${LH_TIMEOUT}ms)`))
-        }, LH_TIMEOUT)
-        child.stderr.on('data', (d) => {
-          errBuf += String(d)
-        })
-        child.on('error', (err) => {
-          clearTimeout(timer)
-          reject(err)
-        })
-        child.on('close', (code) => {
-          clearTimeout(timer)
-          if (code === 0) resolve(errBuf)
-          else reject(new Error(errBuf || `Lighthouse exit code ${code}`))
-        })
+      browser = await puppeteer.launch({
+        headless: true,
+        executablePath: chromePath || undefined,
+        args: [
+          '--no-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--disable-extensions',
+          '--mute-audio',
+          '--hide-scrollbars'
+        ]
       })
 
-      if (!fs.existsSync(tmpJson)) throw new Error('Lighthouse produced no output file')
+      const chromePort = parseInt(new URL(browser.wsEndpoint()).port, 10)
 
-      const fullLhr = JSON.parse(fs.readFileSync(tmpJson, 'utf-8'))
-      try {
-        fs.unlinkSync(tmpJson)
-      } catch {
-        /* ignore */
+      const { default: runLH } = (await import('lighthouse')) as {
+        default: typeof lighthouse
       }
-      return fullLhr
+
+      const lhResult = await Promise.race([
+        runLH(url, {
+          port: chromePort,
+          logLevel: 'error',
+          onlyCategories: ['performance', 'accessibility', 'best-practices', 'seo']
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Lighthouse timeout (${LH_TIMEOUT}ms)`)), LH_TIMEOUT)
+        )
+      ])
+
+      return (lhResult?.lhr as unknown as Record<string, unknown>) ?? null
     } catch (err) {
       console.warn(`⚠ Lighthouse attempt ${attempt}/${LH_RETRY}: ${(err as Error).message}`)
       if (attempt === LH_RETRY) return null
       await new Promise((r) => setTimeout(r, 3000))
     } finally {
-      if (fs.existsSync(tmpJson)) {
-        try {
-          fs.unlinkSync(tmpJson)
-        } catch {
-          /* ignore */
-        }
-      }
+      await browser?.close().catch(() => {})
     }
   }
   return null

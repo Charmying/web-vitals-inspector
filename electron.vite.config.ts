@@ -8,7 +8,13 @@ export default defineConfig({
   main: {
     build: {
       rollupOptions: {
-        external: ['puppeteer', 'lighthouse', 'exceljs', 'axios']
+        external: ['puppeteer', 'lighthouse', 'exceljs', 'axios'],
+        // Keep dynamic import() as native import() in CJS output.
+        // Without this, Rollup converts `import('lighthouse')` to `require('lighthouse')`,
+        // which throws ERR_REQUIRE_ESM because Lighthouse 13 is ESM-only.
+        output: {
+          dynamicImportInCjs: false
+        }
       }
     }
   },
