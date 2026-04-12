@@ -309,12 +309,19 @@ echo "electron_mirror=https://npmmirror.com/mirrors/electron/" >> .npmrc
 
 ### Puppeteer Cannot Find Chrome
 
+This project configures Puppeteer (via `.puppeteerrc.cjs`) to download Chromium into `.puppeteer-cache/` inside the project directory rather than the default `~/.cache/puppeteer`. This ensures the packaged app can bundle the binary via `extraResources`.
+
 ```bash
-# Force Puppeteer to re-download Chromium
+# Download Chromium into .puppeteer-cache/ (run once after cloning)
+npm install
+
+# If Chromium is still missing, force a re-download
 npx puppeteer browsers install chrome
 ```
 
-If running in a sandboxed environment, add `--no-sandbox` to the Puppeteer launch args in `analyzer.ts`.
+> **Note:** `.puppeteer-cache/` is listed in `.gitignore`. Every developer must run `npm install` after cloning to populate it before building or packaging.
+
+If running in a sandboxed environment, the `--no-sandbox` flag is already included in the Puppeteer launch args.
 
 ### Lighthouse Not Found
 

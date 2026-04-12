@@ -52,7 +52,9 @@ web-vitals-inspector/
 │           ├── i18n/
 │           │   └── index.ts            # UI translation strings (EN / ZH)
 │           └── styles/                 # Global CSS styles
-├── electron-builder.yml                # Distribution packaging config
+├── electron-builder.yml                # Distribution packaging config (asar: false, bundles Chrome)
+├── .puppeteerrc.cjs                    # Directs Puppeteer to cache Chrome in .puppeteer-cache/
+├── .puppeteer-cache/                   # Local Chromium download (gitignored; populated by npm install)
 ├── electron.vite.config.ts             # Vite build config for all 3 processes
 ├── package.json
 ├── tsconfig.json                       # Base TypeScript config

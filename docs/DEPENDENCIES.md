@@ -140,7 +140,7 @@ These packages are only used during development, type-checking, and building.
 | **Package** | `electron-builder` |
 | **Version** | `^26.0.12` |
 | **Purpose** | Cross-platform Electron app packaging and distribution |
-| **Why Chosen** | • Produces installers for Windows (NSIS), macOS (DMG), and Linux (AppImage/deb/snap) <br> • Handles `asarUnpack` for native modules and large CLIs <br> • Code signing support for macOS notarization <br> • Auto-update infrastructure via `publish` config |
+| **Why Chosen** | • Produces installers for Windows (NSIS), macOS (DMG), and Linux (AppImage/deb/snap) <br> • Uses `asar: false` so `node_modules/.bin/lighthouse` remains an executable file that can be spawned at runtime <br> • `extraResources` bundles the local `.puppeteer-cache/` Chromium into the packaged app <br> • Code signing support for macOS notarization <br> • Auto-update infrastructure via `publish` config |
 | **Alternatives** | • Forge — Simpler but less flexible packaging options <br> • Squirrel — Windows-only |
 
 ---

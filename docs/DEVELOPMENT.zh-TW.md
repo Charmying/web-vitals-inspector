@@ -309,12 +309,19 @@ echo "electron_mirror=https://npmmirror.com/mirrors/electron/" >> .npmrc
 
 ### Puppeteer 找不到 Chrome
 
+此專案進行了設定（透過 `.puppeteerrc.cjs`），讓 Puppeteer 將 Chromium 下載到專案內的 `.puppeteer-cache/` 目錄，而非預設的 `~/.cache/puppeteer`。這樣可確保封裝後的 App 能透過 `extraResources` 將此執行檔一并打包。
+
 ```bash
-# 強制 Puppeteer 重新下載 Chromium
+# 將 Chromium 下載到 .puppeteer-cache/（安裝後執行一次即可）
+npm install
+
+# 若 Chromium 仍缺失，強制重新下載
 npx puppeteer browsers install chrome
 ```
 
-在沙箱環境中執行時，在 `analyzer.ts` 的 Puppeteer 啟動參數中新增 `--no-sandbox`。
+> **注意：**`.puppeteer-cache/` 已列入 `.gitignore`。每位開發者在水平拉取後必須執行 `npm install` 才能建置完成此目錄，再進行編譯或打包。
+
+沿用沙箱化環境執行時，`--no-sandbox` 已內建在 Puppeteer 啟動參數中，無須完亟手動新增。
 
 ### Lighthouse 找不到
 

@@ -52,7 +52,9 @@ web-vitals-inspector/
 │           ├── i18n/
 │           │   └── index.ts            # UI 翻譯字串（中文 / 英文）
 │           └── styles/                 # 全域 CSS 樣式
-├── electron-builder.yml                # 發布打包設定
+├── electron-builder.yml                # 發布打包設定（asar: false，內包 Chrome）
+├── .puppeteerrc.cjs                    # 指定 Puppeteer 將 Chrome 快取到 .puppeteer-cache/
+├── .puppeteer-cache/                   # 本地 Chromium 下載目錄（gitignore 排除；執行 npm install 後時建置）
 ├── electron.vite.config.ts             # 三個程序共用的 Vite 建置設定
 ├── package.json
 ├── tsconfig.json                       # 基礎 TypeScript 設定

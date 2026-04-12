@@ -140,7 +140,7 @@
 | **套件** | `electron-builder` |
 | **版本** | `^26.0.12` |
 | **用途** | 跨平台 Electron 應用程式打包和發布 |
-| **為什麼選擇** | • 為 Windows（NSIS）、macOS（DMG）和 Linux（AppImage/deb/snap）產生安裝程式 <br> • 處理原生模組和大型 CLI 的 `asarUnpack` <br> • 支援 macOS 公證的程式碼簽署 <br> • 透過 `publish` 設定提供自動更新基礎設施 |
+| **為什麼選擇** | • 為 Windows（NSIS）、macOS（DMG）和 Linux（AppImage/deb/snap）產生安裝程式 <br> • 使用 `asar: false` 讓 `node_modules/.bin/lighthouse` 保持可執行的真實檔案，可在執行時以子程序方式啟動 <br> • `extraResources` 將本地的 `.puppeteer-cache/` Chromium 打包進 App <br> • 支援 macOS 公證的程式碼簽署 <br> • 透過 `publish` 設定提供自動更新基礎設施 |
 | **替代方案** | • Forge — 更簡單但打包選項較少 <br> • Squirrel — 僅限 Windows |
 
 ---
