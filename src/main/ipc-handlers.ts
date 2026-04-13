@@ -20,6 +20,10 @@ export function registerIpcHandlers(): void {
     'seo:start-crawl',
     async (event, rootUrl: string): Promise<{ seoUrls: string[]; allUrls: string[] }> => {
       abortController = { aborted: false }
+      // Reset crawl state so stale data never leaks into a fresh run
+      lastCrawlUrlStatus = null
+      lastCrawlSeoUrls = []
+      lastCrawlAllUrls = []
       const result = await crawlUrls(rootUrl, (progress) => {
         event.sender.send('seo:progress', { type: 'crawl', ...progress })
       }, abortController)
@@ -51,6 +55,8 @@ export function registerIpcHandlers(): void {
     async (event, urls: string[]): Promise<AnalysisResult[]> => {
       abortController = { aborted: false }
       analysisStartTime = Date.now()
+      // Clear previous results so a failed/partial run never bleeds into the report
+      lastAnalysisResults = []
       const results = await analyzeUrls(urls, (progress) => {
         event.sender.send('seo:progress', { type: 'analysis', ...progress })
       }, abortController)

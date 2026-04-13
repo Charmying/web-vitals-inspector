@@ -209,8 +209,12 @@ async function fetchWaybackUrls(domain: string, rootUrl: string, rootHostNoWww: 
 async function fetchSearchEngineUrls(browser: Browser, engine: 'google' | 'bing', domain: string, rootUrl: string, rootHostNoWww: string, analyzer: ParamAnalyzer): Promise<Set<string>> {
   const urls = new Set<string>()
   const page = await browser.newPage()
-  const client = await page.createCDPSession()
-  await client.send('Network.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36' })
+  try {
+    const client = await page.createCDPSession()
+    await client.send('Network.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36' })
+  } catch (e) {
+    console.warn('[crawler] CDP UA override failed for search engine page:', (e as Error).message)
+  }
   const config =
     engine === 'google'
       ? {
@@ -394,8 +398,12 @@ export async function crawlUrls(rootUrl: string, onProgress: (p: CrawlProgress) 
     const crawlPages: Page[] = []
     for (let i = 0; i < CONCURRENCY; i++) {
       const p = await browser.newPage()
-      const client = await p.createCDPSession()
-      await client.send('Network.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (compatible; SEO-Crawler/6.0)' })
+      try {
+        const client = await p.createCDPSession()
+        await client.send('Network.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (compatible; SEO-Crawler/6.0)' })
+      } catch (e) {
+        console.warn(`[crawler] CDPSession setup failed for worker ${i}:`, (e as Error).message)
+      }
       await p.setRequestInterception(true)
       p.on('request', (req) => { ;['image', 'stylesheet', 'font', 'media'].includes(req.resourceType()) ? req.abort() : req.continue() })
       crawlPages.push(p)

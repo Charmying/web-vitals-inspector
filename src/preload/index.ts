@@ -19,9 +19,13 @@ const api = {
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)
+  } catch (error) {
+    console.error('[preload] Failed to expose electron API:', error)
+  }
+  try {
     contextBridge.exposeInMainWorld('api', api)
   } catch (error) {
-    console.error(error)
+    console.error('[preload] Failed to expose SEO API:', error)
   }
 } else {
   // @ts-ignore (define in dts)

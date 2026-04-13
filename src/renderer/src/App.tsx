@@ -81,6 +81,11 @@ function App(): React.JSX.Element {
     setLogs([])
     setProgress(null)
 
+    if (!window.api) {
+      setError(uiLocale === 'zh' ? 'API 橋接器不可用，請重新啟動應用程式' : 'API bridge unavailable. Please restart the application.')
+      return
+    }
+
     if (mode === 'single') {
       if (!url.trim() || !url.startsWith('http')) {
         setError(t(uiLocale, 'errorInvalidUrl'))
@@ -132,6 +137,10 @@ function App(): React.JSX.Element {
 
   /** Start Lighthouse analysis on selected URLs */
   const handleAnalysis = async (): Promise<void> => {
+    if (!window.api) {
+      setError(uiLocale === 'zh' ? 'API 橋接器不可用，請重新啟動應用程式' : 'API bridge unavailable. Please restart the application.')
+      return
+    }
     setError(null)
     setIsRunning(true)
     setStep('running')
@@ -154,6 +163,10 @@ function App(): React.JSX.Element {
 
   /** Save analysis report as Excel file */
   const handleSaveReport = async (): Promise<void> => {
+    if (!window.api) {
+      setError(uiLocale === 'zh' ? 'API 橋接器不可用，請重新啟動應用程式' : 'API bridge unavailable. Please restart the application.')
+      return
+    }
     setSaving(true)
     setError(null)
     try {
@@ -172,11 +185,13 @@ function App(): React.JSX.Element {
 
   /** Download URL list as .txt file via main process dialog */
   const handleDownloadUrls = async (type: 'seo' | 'all'): Promise<void> => {
+    if (!window.api) return
     await window.api.downloadUrls(type)
   }
 
   /** Abort current crawl or analysis operation */
   const handleAbort = async (): Promise<void> => {
+    if (!window.api) return
     await window.api.abort()
     setIsCrawling(false)
     setIsRunning(false)

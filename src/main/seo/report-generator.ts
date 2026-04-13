@@ -5,7 +5,14 @@ import { getSheetNames, getUrlStatusHeaders, getPageDataHeaders, getIssuesHeader
 
 const PRIORITY_RANK: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 }
 const clean = (v: string | null | undefined): string => (v ?? '').replace(/\[.*?\]\(.*?\)/g, '').replace(/`/g, '').replace(/\n+/g, ' ').trim().slice(0, 250)
-const pct = (v: number | null | undefined): string | number => v != null ? Math.round(v * 100) : ''
+const pct = (v: number | null | undefined): string | number => v != null ? Math.round(v * 100) : 'N/A'
+const av = (lhr: AnalysisResult['lhr'], key: string): string => {
+  if (!lhr) return 'N/A'
+  const audit = lhr.audits?.[key]
+  if (!audit) return 'N/A'
+  const val = audit.displayValue
+  return val ? val : 'N/A'
+}
 
 /** Detect duplicate values across analysis results for deduplication warnings */
 function detectDuplicates( results: AnalysisResult[], getter: (r: AnalysisResult) => string | null | undefined): Record<string, string[]> {
@@ -107,8 +114,6 @@ function generatePageDataSheet( wb: ExcelJS.Workbook, sheetName: string, results
   const ws = wb.addWorksheet(sheetName)
   const headers = getPageDataHeaders(locale)
   ws.addRow(headers)
-
-  const av = (lhr: AnalysisResult['lhr'], key: string): string => lhr?.audits?.[key]?.displayValue ?? ''
 
   for (const { url, lhr, meta, tech } of results) {
     const cats = lhr?.categories ?? {}
