@@ -2,6 +2,10 @@ appId: com.electron.app
 productName: Web Vitals Inspector
 directories:
   buildResources: build
+# Run build/afterSign.js after the app is assembled to apply free ad-hoc
+# code signing. This prevents the "damaged app" error on Apple Silicon Macs
+# and makes the "Open Anyway" bypass appear in Privacy & Security.
+afterSign: build/afterSign.js
 # Disable asar so that node_modules/.bin/lighthouse.cmd can be spawned as a
 # real subprocess and Lighthouse can require() its own modules at runtime.
 asar: false
@@ -28,6 +32,10 @@ nsis:
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
+  # Setting identity to null prevents electron-builder from trying to locate a
+  # Developer ID certificate. The actual signing is handled by afterSign.js
+  # using an ad-hoc identity (-), which is free and requires no Apple account.
+  identity: null
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.
@@ -36,7 +44,10 @@ mac:
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
   notarize: false
 dmg:
-  artifactName: ${name}-${version}.${ext}
+  # Include architecture in the filename so users can pick the right build:
+  #   *-arm64.dmg  → Apple Silicon (M1 / M2 / M3 / M4)
+  #   *-x64.dmg   → Intel Mac
+  artifactName: ${name}-${version}-${arch}.${ext}
 linux:
   target:
     - AppImage
