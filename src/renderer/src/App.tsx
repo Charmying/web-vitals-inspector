@@ -34,6 +34,8 @@ function App(): React.JSX.Element {
   const [reportLocale, setReportLocale] = useState<ReportLocale>('zh')
   const [urls, setUrls] = useState<string[]>([])
   const [allCrawledUrls, setAllCrawledUrls] = useState<string[]>([])
+  const [crawledSeoUrls, setCrawledSeoUrls] = useState<string[]>([])
+  const [urlFilter, setUrlFilter] = useState<'seo' | 'all'>('seo')
   const [progress, setProgress] = useState<ProgressData | null>(null)
   const [logs, setLogs] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -122,8 +124,10 @@ function App(): React.JSX.Element {
 
     try {
       const result = await window.api.startCrawl(url.trim())
-      setUrls(result.seoUrls)
+      setCrawledSeoUrls(result.seoUrls)
       setAllCrawledUrls(result.allUrls)
+      setUrls(result.seoUrls)
+      setUrlFilter('seo')
       setIsCrawling(false)
       setIsRunning(false)
       addLog(t(uiLocale, 'crawlComplete', { count: result.seoUrls.length }))
@@ -183,6 +187,12 @@ function App(): React.JSX.Element {
     }
   }
 
+  /** Switch between SEO-only and all-URLs views */
+  const handleUrlFilterChange = (filter: 'seo' | 'all'): void => {
+    setUrlFilter(filter)
+    setUrls(filter === 'seo' ? crawledSeoUrls : allCrawledUrls)
+  }
+
   /** Download URL list as .txt file via main process dialog */
   const handleDownloadUrls = async (type: 'seo' | 'all'): Promise<void> => {
     if (!window.api) return
@@ -205,6 +215,8 @@ function App(): React.JSX.Element {
     setUrl('')
     setUrls([])
     setAllCrawledUrls([])
+    setCrawledSeoUrls([])
+    setUrlFilter('seo')
     setProgress(null)
     setLogs([])
     setError(null)
@@ -352,7 +364,7 @@ function App(): React.JSX.Element {
               <div>
                 <h2 className="section-title">{t(uiLocale, 'urlListTitle')}</h2>
                 <span className="url-count">
-                  {mode === 'crawl' && allCrawledUrls.length > urls.length ? t(uiLocale, 'urlCountSeo', { seo: urls.length, total: allCrawledUrls.length }) : t(uiLocale, 'urlCount', { count: urls.length })}
+                  {t(uiLocale, 'urlCount', { count: urls.length })}
                 </span>
               </div>
               <div className="download-btns">
@@ -364,6 +376,23 @@ function App(): React.JSX.Element {
                 )}
               </div>
             </div>
+
+            {mode === 'crawl' && crawledSeoUrls.length < allCrawledUrls.length && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                <button
+                  className={`btn btn-sm ${urlFilter === 'seo' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => handleUrlFilterChange('seo')}
+                >
+                  {t(uiLocale, 'filterSeo', { count: crawledSeoUrls.length })}
+                </button>
+                <button
+                  className={`btn btn-sm ${urlFilter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => handleUrlFilterChange('all')}
+                >
+                  {t(uiLocale, 'filterAll', { count: allCrawledUrls.length })}
+                </button>
+              </div>
+            )}
 
             <div className="url-table-container">
               <table className="url-table">
