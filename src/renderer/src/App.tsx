@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useTheme } from './hooks/useTheme'
 import { ThemeToggle } from './components/ThemeToggle'
 import { HelpModal } from './components/HelpModal'
@@ -7,6 +7,9 @@ import { t, type UILocale } from './i18n'
 type Mode = 'crawl' | 'single' | 'upload'
 type Step = 'input' | 'urls' | 'settings' | 'running' | 'done'
 type ReportLocale = 'en' | 'zh'
+
+/** Cap the in-UI log buffer so a 10k-page crawl never balloons renderer memory */
+const MAX_LOG_LINES = 500
 
 interface ProgressData {
   type: 'crawl' | 'analysis'
@@ -19,7 +22,7 @@ interface ProgressData {
   seoScore?: string
 }
 
-/** Main application component with i18n, theming, and step-based workflow */
+/** Main application component with i18n, theming, and a step-based workflow */
 function App(): React.JSX.Element {
   const { theme, toggle: toggleTheme } = useTheme()
 
@@ -47,13 +50,22 @@ function App(): React.JSX.Element {
   const logEndRef = useRef<HTMLDivElement>(null)
   const analysisStartRef = useRef<number>(0)
 
-  /** Persist UI locale preference to localStorage */
   useEffect(() => {
     localStorage.setItem('wvi-locale', uiLocale)
+    document.documentElement.setAttribute('lang', uiLocale === 'zh' ? 'zh-Hant' : 'en')
+  }, [uiLocale])
+
+  // Reflect the app title in the OS window title (and keep it in sync with locale).
+  useEffect(() => {
+    document.title = t(uiLocale, 'appTitle')
   }, [uiLocale])
 
   const addLog = useCallback((msg: string) => {
-    setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`])
+    setLogs((prev) => {
+      const entry = `[${new Date().toLocaleTimeString()}] ${msg}`
+      const next = prev.length >= MAX_LOG_LINES ? prev.slice(-MAX_LOG_LINES + 1) : prev
+      return [...next, entry]
+    })
   }, [])
 
   /** Listen for progress events from main process */
@@ -65,7 +77,8 @@ function App(): React.JSX.Element {
       if (p.type === 'crawl' && p.message) {
         addLog(p.message)
       } else if (p.type === 'analysis' && p.currentUrl) {
-        const extra = p.perfScore && p.seoScore ? ` → Perf: ${p.perfScore} | SEO: ${p.seoScore}` : ''
+        const extra =
+          p.perfScore && p.seoScore ? ` → Perf: ${p.perfScore} | SEO: ${p.seoScore}` : ''
         addLog(`[${p.current}/${p.total}] ${p.currentUrl}${extra}`)
       }
     })
@@ -84,16 +97,18 @@ function App(): React.JSX.Element {
     setProgress(null)
 
     if (!window.api) {
-      setError(uiLocale === 'zh' ? 'API 橋接器不可用，請重新啟動應用程式' : 'API bridge unavailable. Please restart the application.')
+      setError(t(uiLocale, 'errorApiBridge'))
       return
     }
 
     if (mode === 'single') {
-      if (!url.trim() || !url.startsWith('http')) {
+      if (!url.trim() || !/^https?:\/\//i.test(url.trim())) {
         setError(t(uiLocale, 'errorInvalidUrl'))
         return
       }
       setUrls([url.trim()])
+      setAllCrawledUrls([url.trim()])
+      setCrawledSeoUrls([])
       setStep('settings')
       addLog(`${t(uiLocale, 'single')} ${url.trim()}`)
       return
@@ -101,19 +116,24 @@ function App(): React.JSX.Element {
 
     if (mode === 'upload') {
       addLog(`${t(uiLocale, 'selectFile')}...`)
-      const parsed = await window.api.parseUrlsFile()
-      if (!parsed || parsed.length === 0) {
-        setError(t(uiLocale, 'errorNoFile'))
-        return
+      try {
+        const parsed = await window.api.parseUrlsFile()
+        if (!parsed || parsed.length === 0) {
+          setError(t(uiLocale, 'errorNoFile'))
+          return
+        }
+        setUrls(parsed)
+        setAllCrawledUrls(parsed)
+        setCrawledSeoUrls([])
+        addLog(t(uiLocale, 'fileLoaded', { count: parsed.length }))
+        setStep('urls')
+      } catch (err) {
+        setError(`${t(uiLocale, 'errorNoFile')} ${(err as Error).message}`)
       }
-      setUrls(parsed)
-      setAllCrawledUrls(parsed)
-      addLog(t(uiLocale, 'fileLoaded', { count: parsed.length }))
-      setStep('urls')
       return
     }
 
-    if (!url.trim() || !url.startsWith('http')) {
+    if (!url.trim() || !/^https?:\/\//i.test(url.trim())) {
       setError(t(uiLocale, 'errorInvalidUrl'))
       return
     }
@@ -139,10 +159,10 @@ function App(): React.JSX.Element {
     }
   }
 
-  /** Start Lighthouse analysis on selected URLs */
+  /** Start Lighthouse analysis on the selected URLs */
   const handleAnalysis = async (): Promise<void> => {
     if (!window.api) {
-      setError(uiLocale === 'zh' ? 'API 橋接器不可用，請重新啟動應用程式' : 'API bridge unavailable. Please restart the application.')
+      setError(t(uiLocale, 'errorApiBridge'))
       return
     }
     setError(null)
@@ -160,7 +180,12 @@ function App(): React.JSX.Element {
       setStep('done')
       addLog(t(uiLocale, 'analysisDone'))
     } catch (err) {
+      // Keep user on `done` step so any partial results collected by the main
+      // process can still be saved as a report — a far better UX than losing
+      // the entire run on a timeout or user-initiated abort.
       setIsRunning(false)
+      setAnalysisComplete(true)
+      setStep('done')
       setError(`${t(uiLocale, 'analysisFailed')} ${(err as Error).message}`)
     }
   }
@@ -168,7 +193,7 @@ function App(): React.JSX.Element {
   /** Save analysis report as Excel file */
   const handleSaveReport = async (): Promise<void> => {
     if (!window.api) {
-      setError(uiLocale === 'zh' ? 'API 橋接器不可用，請重新啟動應用程式' : 'API bridge unavailable. Please restart the application.')
+      setError(t(uiLocale, 'errorApiBridge'))
       return
     }
     setSaving(true)
@@ -206,7 +231,14 @@ function App(): React.JSX.Element {
     setIsCrawling(false)
     setIsRunning(false)
     addLog(t(uiLocale, 'aborted'))
-    setStep('input')
+    // When aborting a crawl, go back to input; when aborting an analysis, stay
+    // on `done` so the partial report is still reachable via Save.
+    if (step === 'running') {
+      setAnalysisComplete(true)
+      setStep('done')
+    } else {
+      setStep('input')
+    }
   }
 
   /** Reset all state to initial values */
@@ -238,15 +270,22 @@ function App(): React.JSX.Element {
     return `${t(uiLocale, 'etaPrefix')} ${t(uiLocale, 'etaSeconds', { sec })}`
   }
 
-  const steps = [
-    { key: 'input', label: t(uiLocale, 'stepInput') },
-    { key: 'urls', label: t(uiLocale, 'stepUrls') },
-    { key: 'settings', label: t(uiLocale, 'stepSettings') },
-    { key: 'running', label: t(uiLocale, 'stepRunning') },
-    { key: 'done', label: t(uiLocale, 'stepDone') }
-  ]
+  const steps = useMemo(
+    () => [
+      { key: 'input', label: t(uiLocale, 'stepInput') },
+      { key: 'urls', label: t(uiLocale, 'stepUrls') },
+      { key: 'settings', label: t(uiLocale, 'stepSettings') },
+      { key: 'running', label: t(uiLocale, 'stepRunning') },
+      { key: 'done', label: t(uiLocale, 'stepDone') }
+    ],
+    [uiLocale]
+  )
 
   const stepIndex = steps.findIndex((s) => s.key === step)
+  const progressPct =
+    progress && progress.total > 0
+      ? Math.min(Math.round((progress.current / progress.total) * 100), 100)
+      : 0
 
   return (
     <div className="app">
@@ -260,27 +299,56 @@ function App(): React.JSX.Element {
           </div>
           <div className="header-controls">
             <ThemeToggle theme={theme} onToggle={toggleTheme} />
-            <button className="icon-btn lang-btn" onClick={() => setUiLocale((prev) => (prev === 'zh' ? 'en' : 'zh'))}> {uiLocale === 'zh' ? 'EN' : '中'}</button>
-            <button className="icon-btn" onClick={() => setShowHelp(true)} aria-label="Help">
+            <button
+              className="icon-btn lang-btn"
+              onClick={() => setUiLocale((prev) => (prev === 'zh' ? 'en' : 'zh'))}
+              aria-label={uiLocale === 'zh' ? 'Switch to English' : '切換為中文'}
+            >
+              {uiLocale === 'zh' ? 'EN' : '中'}
+            </button>
+            <button
+              className="icon-btn"
+              onClick={() => setShowHelp(true)}
+              aria-label={t(uiLocale, 'helpBtn')}
+              title={t(uiLocale, 'helpBtn')}
+            >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" />
                 <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
                 <line x1="12" y1="17" x2="12.01" y2="17" />
               </svg>
             </button>
-            {step !== 'input' && (<button className="icon-btn reset-btn" onClick={handleReset}>{t(uiLocale, 'resetBtn')}</button>)}
+            {step !== 'input' && (
+              <button
+                className="icon-btn reset-btn"
+                onClick={handleReset}
+                aria-label={t(uiLocale, 'resetBtn')}
+              >
+                {t(uiLocale, 'resetBtn')}
+              </button>
+            )}
           </div>
         </div>
 
         {/* Step indicator */}
-        <div className="stepper">
-          {steps.map((s, i) => (
-            <div key={s.key} className="stepper-item">
-              <div className={`stepper-dot ${i < stepIndex ? 'completed' : i === stepIndex ? 'active' : 'pending'}`}>{i < stepIndex ? '✓' : i + 1}</div>
-              <span className={`stepper-label ${i < stepIndex ? 'completed' : i === stepIndex ? 'active' : 'pending'}`}>{s.label}</span>
-              {i < steps.length - 1 && (<div className={`stepper-line ${ i < stepIndex - 1 ? 'completed' : i === stepIndex - 1 ? 'active' : 'pending'}`} />)}
-            </div>
-          ))}
+        <div className="stepper" role="navigation" aria-label="Workflow steps">
+          {steps.map((s, i) => {
+            const state = i < stepIndex ? 'completed' : i === stepIndex ? 'active' : 'pending'
+            const lineState =
+              i < stepIndex - 1 ? 'completed' : i === stepIndex - 1 ? 'active' : 'pending'
+            return (
+              <div key={s.key} className="stepper-item">
+                <div
+                  className={`stepper-dot ${state}`}
+                  aria-current={state === 'active' ? 'step' : undefined}
+                >
+                  {state === 'completed' ? '✓' : i + 1}
+                </div>
+                <span className={`stepper-label ${state}`}>{s.label}</span>
+                {i < steps.length - 1 && <div className={`stepper-line ${lineState}`} />}
+              </div>
+            )
+          })}
         </div>
       </header>
 
@@ -289,8 +357,17 @@ function App(): React.JSX.Element {
         {/* Step 1: Input mode and URL */}
         {step === 'input' && !isCrawling && (
           <div className="animate-fadeInUp" style={{ maxWidth: 640, margin: '0 auto' }}>
-            <h2 className="section-title" style={{ marginBottom: 20 }}>{t(uiLocale, 'selectMode')}</h2>
-            <div style={{display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 24}}>
+            <h2 className="section-title" style={{ marginBottom: 20 }}>
+              {t(uiLocale, 'selectMode')}
+            </h2>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: 12,
+                marginBottom: 24
+              }}
+            >
               {(
                 [
                   ['crawl', '🌐', t(uiLocale, 'modeCrawl'), t(uiLocale, 'modeCrawlDesc')],
@@ -298,7 +375,12 @@ function App(): React.JSX.Element {
                   ['upload', '📁', t(uiLocale, 'modeUpload'), t(uiLocale, 'modeUploadDesc')]
                 ] as [Mode, string, string, string][]
               ).map(([m, icon, label, desc]) => (
-                <button key={m} onClick={() => setMode(m)} className={`mode-card ${mode === m ? 'selected' : ''}`}>
+                <button
+                  key={m}
+                  onClick={() => setMode(m)}
+                  className={`mode-card ${mode === m ? 'selected' : ''}`}
+                  aria-pressed={mode === m}
+                >
                   <div className="mode-card-icon">{icon}</div>
                   <div className="mode-card-title">{label}</div>
                   <div className="mode-card-desc">{desc}</div>
@@ -308,16 +390,41 @@ function App(): React.JSX.Element {
 
             {mode !== 'upload' && (
               <div style={{ marginBottom: 16 }}>
-                <label className="label">{mode === 'crawl' ? t(uiLocale, 'rootUrl') : t(uiLocale, 'singleUrl')}</label>
-                <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder={t(uiLocale, 'urlPlaceholder')} className="input" onKeyDown={(e) => e.key === 'Enter' && handleStart()} />
+                <label className="label" htmlFor="wvi-root-url">
+                  {mode === 'crawl' ? t(uiLocale, 'rootUrl') : t(uiLocale, 'singleUrl')}
+                </label>
+                <input
+                  id="wvi-root-url"
+                  type="url"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder={t(uiLocale, 'urlPlaceholder')}
+                  className="input"
+                  autoComplete="off"
+                  spellCheck={false}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      handleStart()
+                    }
+                  }}
+                />
               </div>
             )}
 
             {error && (
-              <div className="error-alert" style={{ marginBottom: 16 }}>{error}</div>
+              <div className="error-alert" role="alert" style={{ marginBottom: 16 }}>
+                {error}
+              </div>
             )}
 
-            <button onClick={handleStart} className="btn btn-primary btn-full" disabled={isRunning}>{mode === 'crawl' ? t(uiLocale, 'startCrawl') : mode === 'single' ? t(uiLocale, 'nextStep') : t(uiLocale, 'selectFile')}</button>
+            <button onClick={handleStart} className="btn btn-primary btn-full" disabled={isRunning}>
+              {mode === 'crawl'
+                ? t(uiLocale, 'startCrawl')
+                : mode === 'single'
+                  ? t(uiLocale, 'nextStep')
+                  : t(uiLocale, 'selectFile')}
+            </button>
           </div>
         )}
 
@@ -326,21 +433,29 @@ function App(): React.JSX.Element {
           <div className="animate-fadeInUp" style={{ maxWidth: 800, margin: '0 auto' }}>
             <div className="flex-between" style={{ marginBottom: 16 }}>
               <h2 className="section-title">{t(uiLocale, 'crawling')}</h2>
-              <button onClick={handleAbort} className="btn btn-danger btn-sm">{t(uiLocale, 'abort')}</button>
+              <button onClick={handleAbort} className="btn btn-danger btn-sm">
+                {t(uiLocale, 'abort')}
+              </button>
             </div>
 
             {progress && progress.total > 0 && (
               <div className="progress-bar-container">
                 <div className="progress-labels">
-                  <span>{progress.current} / {progress.total}</span>
-                  <span>{Math.round((progress.current / progress.total) * 100)}%</span>
+                  <span>
+                    {progress.current} / {progress.total}
+                  </span>
+                  <span>{progressPct}%</span>
                 </div>
-                <div className="progress-track">
-                  <div className="progress-fill" style={{width: `${Math.min((progress.current / progress.total) * 100, 100)}%`}} />
+                <div
+                  className="progress-track"
+                  role="progressbar"
+                  aria-valuenow={progressPct}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
+                  <div className="progress-fill" style={{ width: `${progressPct}%` }} />
                 </div>
-                {progress.currentUrl && (
-                  <div className="progress-url">{progress.currentUrl}</div>
-                )}
+                {progress.currentUrl && <div className="progress-url">{progress.currentUrl}</div>}
               </div>
             )}
 
@@ -352,7 +467,9 @@ function App(): React.JSX.Element {
             </div>
 
             {error && (
-              <div className="error-alert" style={{ marginTop: 16 }}>{error}</div>
+              <div className="error-alert" role="alert" style={{ marginTop: 16 }}>
+                {error}
+              </div>
             )}
           </div>
         )}
@@ -363,15 +480,23 @@ function App(): React.JSX.Element {
             <div className="flex-between" style={{ marginBottom: 16 }}>
               <div>
                 <h2 className="section-title">{t(uiLocale, 'urlListTitle')}</h2>
-                <span className="url-count">
-                  {t(uiLocale, 'urlCount', { count: urls.length })}
-                </span>
+                <span className="url-count">{t(uiLocale, 'urlCount', { count: urls.length })}</span>
               </div>
               <div className="download-btns">
                 {mode === 'crawl' && allCrawledUrls.length > 0 && (
                   <>
-                    <button className="btn btn-secondary btn-sm" onClick={() => handleDownloadUrls('seo')}>⬇ {t(uiLocale, 'downloadSeoUrls')}</button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => handleDownloadUrls('all')}>⬇ {t(uiLocale, 'downloadAllUrls')}</button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleDownloadUrls('seo')}
+                    >
+                      ⬇ {t(uiLocale, 'downloadSeoUrls')}
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleDownloadUrls('all')}
+                    >
+                      ⬇ {t(uiLocale, 'downloadAllUrls')}
+                    </button>
                   </>
                 )}
               </div>
@@ -382,12 +507,14 @@ function App(): React.JSX.Element {
                 <button
                   className={`btn btn-sm ${urlFilter === 'seo' ? 'btn-primary' : 'btn-secondary'}`}
                   onClick={() => handleUrlFilterChange('seo')}
+                  aria-pressed={urlFilter === 'seo'}
                 >
                   {t(uiLocale, 'filterSeo', { count: crawledSeoUrls.length })}
                 </button>
                 <button
                   className={`btn btn-sm ${urlFilter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
                   onClick={() => handleUrlFilterChange('all')}
+                  aria-pressed={urlFilter === 'all'}
                 >
                   {t(uiLocale, 'filterAll', { count: allCrawledUrls.length })}
                 </button>
@@ -414,17 +541,28 @@ function App(): React.JSX.Element {
             </div>
 
             {urls.length === 0 && (
-              <div className="error-alert" style={{ marginBottom: 12 }}>{t(uiLocale, 'noSeoUrls')}</div>
+              <div className="error-alert" role="alert" style={{ marginBottom: 12 }}>
+                {t(uiLocale, 'noSeoUrls')}
+              </div>
             )}
 
-            <button onClick={() => setStep('settings')} className="btn btn-primary btn-full" style={{ marginTop: urls.length > 0 ? 16 : 0 }} disabled={urls.length === 0}>{t(uiLocale, 'confirmUrls')}</button>
+            <button
+              onClick={() => setStep('settings')}
+              className="btn btn-primary btn-full"
+              style={{ marginTop: urls.length > 0 ? 16 : 0 }}
+              disabled={urls.length === 0}
+            >
+              {t(uiLocale, 'confirmUrls')}
+            </button>
           </div>
         )}
 
         {/* Step 3: Analysis Settings */}
         {step === 'settings' && (
           <div className="animate-fadeInUp" style={{ maxWidth: 520, margin: '0 auto' }}>
-            <h2 className="section-title" style={{ marginBottom: 20 }}>{t(uiLocale, 'settingsTitle')}</h2>
+            <h2 className="section-title" style={{ marginBottom: 20 }}>
+              {t(uiLocale, 'settingsTitle')}
+            </h2>
 
             <div style={{ marginBottom: 24 }}>
               <label className="label">{t(uiLocale, 'reportLanguage')}</label>
@@ -435,7 +573,12 @@ function App(): React.JSX.Element {
                     ['zh', '🇹🇼 中文']
                   ] as [ReportLocale, string][]
                 ).map(([loc, label]) => (
-                  <button key={loc} onClick={() => setReportLocale(loc)} className={`locale-card ${reportLocale === loc ? 'selected' : ''}`}>
+                  <button
+                    key={loc}
+                    onClick={() => setReportLocale(loc)}
+                    className={`locale-card ${reportLocale === loc ? 'selected' : ''}`}
+                    aria-pressed={reportLocale === loc}
+                  >
                     <span style={{ fontSize: 14, fontWeight: 600 }}>{label}</span>
                   </button>
                 ))}
@@ -443,7 +586,16 @@ function App(): React.JSX.Element {
             </div>
 
             <div className="summary-card" style={{ marginBottom: 24 }}>
-              <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: 'var(--text-primary)' }}>{t(uiLocale, 'analysisSummary')}</h3>
+              <h3
+                style={{
+                  fontSize: 14,
+                  fontWeight: 700,
+                  marginBottom: 12,
+                  color: 'var(--text-primary)'
+                }}
+              >
+                {t(uiLocale, 'analysisSummary')}
+              </h3>
               <div className="summary-row">
                 <span className="summary-label">{t(uiLocale, 'pagesCount')}</span>
                 <span className="summary-value">{urls.length}</span>
@@ -459,10 +611,14 @@ function App(): React.JSX.Element {
             </div>
 
             {error && (
-              <div className="error-alert" style={{ marginBottom: 16 }}>{error}</div>
+              <div className="error-alert" role="alert" style={{ marginBottom: 16 }}>
+                {error}
+              </div>
             )}
 
-            <button onClick={handleAnalysis} className="btn btn-success btn-full">🚀 {t(uiLocale, 'startAnalysis')}</button>
+            <button onClick={handleAnalysis} className="btn btn-success btn-full">
+              🚀 {t(uiLocale, 'startAnalysis')}
+            </button>
           </div>
         )}
 
@@ -470,24 +626,34 @@ function App(): React.JSX.Element {
         {step === 'running' && (
           <div className="animate-fadeInUp" style={{ maxWidth: 800, margin: '0 auto' }}>
             <div className="flex-between" style={{ marginBottom: 16 }}>
-              <h2 className="section-title">{progress?.type === 'crawl' ? t(uiLocale, 'crawling') : t(uiLocale, 'analyzing')}</h2>
+              <h2 className="section-title">
+                {progress?.type === 'crawl' ? t(uiLocale, 'crawling') : t(uiLocale, 'analyzing')}
+              </h2>
               {isRunning && (
-                <button onClick={handleAbort} className="btn btn-danger btn-sm">{t(uiLocale, 'abort')}</button>
+                <button onClick={handleAbort} className="btn btn-danger btn-sm">
+                  {t(uiLocale, 'abort')}
+                </button>
               )}
             </div>
 
             {progress && progress.total > 0 && (
               <div className="progress-bar-container">
                 <div className="progress-labels">
-                  <span>{progress.current} / {progress.total}</span>
-                  <span>{Math.round((progress.current / progress.total) * 100)}%</span>
+                  <span>
+                    {progress.current} / {progress.total}
+                  </span>
+                  <span>{progressPct}%</span>
                 </div>
-                <div className="progress-track">
-                  <div className="progress-fill" style={{ width: `${Math.min((progress.current / progress.total) * 100, 100)}%` }} />
+                <div
+                  className="progress-track"
+                  role="progressbar"
+                  aria-valuenow={progressPct}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
+                  <div className="progress-fill" style={{ width: `${progressPct}%` }} />
                 </div>
-                {progress.currentUrl && (
-                  <div className="progress-url">{progress.currentUrl}</div>
-                )}
+                {progress.currentUrl && <div className="progress-url">{progress.currentUrl}</div>}
                 {getEta() && <div className="eta-display">{getEta()}</div>}
               </div>
             )}
@@ -500,54 +666,43 @@ function App(): React.JSX.Element {
             </div>
 
             {error && (
-              <div className="error-alert" style={{ marginTop: 16 }}>{error}</div>
+              <div className="error-alert" role="alert" style={{ marginTop: 16 }}>
+                {error}
+              </div>
             )}
           </div>
         )}
 
-        {/* Step 5: Done — save report | 步驟 5: 完成 — 儲存報告 */}
+        {/* Step 5: Done — save report */}
         {step === 'done' && analysisComplete && (
           <div className="animate-fadeInUp" style={{ maxWidth: 800, margin: '0 auto' }}>
             <div className="success-card" style={{ marginBottom: 24 }}>
               <div className="success-icon">🎉</div>
               <h2 className="success-title">{t(uiLocale, 'analysisComplete')}</h2>
-              <p className="success-desc">{t(uiLocale, 'pagesAnalyzed', { count: urls.length })}</p>
+              <p className="success-desc">
+                {t(uiLocale, 'pagesAnalyzed', { count: urls.length })}
+              </p>
             </div>
 
             <div className="card card-padded" style={{ marginBottom: 24 }}>
-              <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14, color: 'var(--text-primary)' }}>{t(uiLocale, 'reportContents')}</h3>
+              <h3
+                style={{
+                  fontSize: 14,
+                  fontWeight: 700,
+                  marginBottom: 14,
+                  color: 'var(--text-primary)'
+                }}
+              >
+                {t(uiLocale, 'reportContents')}
+              </h3>
               <div className="sheet-grid">
                 {[
-                  [
-                    '📊',
-                    t(uiLocale, 'sheetUrlStatus'),
-                    t(uiLocale, 'sheetUrlStatusDesc')
-                  ],
-                  [
-                    '📋',
-                    t(uiLocale, 'sheetExecSummary'),
-                    t(uiLocale, 'sheetExecSummaryDesc')
-                  ],
-                  [
-                    '📌',
-                    t(uiLocale, 'sheetTopIssues'),
-                    t(uiLocale, 'sheetTopIssuesDesc')
-                  ],
-                  [
-                    '🔍',
-                    t(uiLocale, 'sheetIssueDetails'),
-                    t(uiLocale, 'sheetIssueDetailsDesc')
-                  ],
-                  [
-                    '📄',
-                    t(uiLocale, 'sheetPageData'),
-                    t(uiLocale, 'sheetPageDataDesc')
-                  ],
-                  [
-                    '📖',
-                    t(uiLocale, 'sheetGlossary'),
-                    t(uiLocale, 'sheetGlossaryDesc')
-                  ]
+                  ['📊', t(uiLocale, 'sheetUrlStatus'), t(uiLocale, 'sheetUrlStatusDesc')],
+                  ['📋', t(uiLocale, 'sheetExecSummary'), t(uiLocale, 'sheetExecSummaryDesc')],
+                  ['📌', t(uiLocale, 'sheetTopIssues'), t(uiLocale, 'sheetTopIssuesDesc')],
+                  ['🔍', t(uiLocale, 'sheetIssueDetails'), t(uiLocale, 'sheetIssueDetailsDesc')],
+                  ['📄', t(uiLocale, 'sheetPageData'), t(uiLocale, 'sheetPageDataDesc')],
+                  ['📖', t(uiLocale, 'sheetGlossary'), t(uiLocale, 'sheetGlossaryDesc')]
                 ].map(([icon, name, desc]) => (
                   <div key={name} className="sheet-item">
                     <span className="sheet-icon">{icon}</span>
@@ -560,10 +715,19 @@ function App(): React.JSX.Element {
               </div>
             </div>
 
-            <button onClick={handleSaveReport} disabled={saving} className="btn btn-primary btn-full" style={{ marginBottom: 16 }}>{saving ? t(uiLocale, 'saving') : `💾 ${t(uiLocale, 'saveReport')}`}</button>
+            <button
+              onClick={handleSaveReport}
+              disabled={saving}
+              className="btn btn-primary btn-full"
+              style={{ marginBottom: 16 }}
+            >
+              {saving ? t(uiLocale, 'saving') : `💾 ${t(uiLocale, 'saveReport')}`}
+            </button>
 
             {error && (
-              <div className="error-alert" style={{ marginBottom: 16 }}>{error}</div>
+              <div className="error-alert" role="alert" style={{ marginBottom: 16 }}>
+                {error}
+              </div>
             )}
 
             <details>
@@ -579,7 +743,9 @@ function App(): React.JSX.Element {
       </main>
 
       {/* Footer */}
-      <footer className="app-footer">Web Vitals Inspector — SEO Audit Tool powered by Lighthouse</footer>
+      <footer className="app-footer">
+        Web Vitals Inspector — SEO Audit Tool powered by Lighthouse
+      </footer>
 
       {/* Help modal */}
       {showHelp && <HelpModal locale={uiLocale} onClose={() => setShowHelp(false)} />}

@@ -1,13 +1,43 @@
+import { useEffect, useRef } from 'react'
 import { t, type UILocale } from '../i18n'
 
 /** Help modal dialog with usage instructions and .txt format guide */
-export function HelpModal({ locale, onClose} : { locale: UILocale, onClose: () => void }): React.JSX.Element {
+export function HelpModal({
+  locale,
+  onClose
+}: {
+  locale: UILocale
+  onClose: () => void
+}): React.JSX.Element {
+  const closeBtnRef = useRef<HTMLButtonElement>(null)
+
+  // Close on Escape and give the close button initial focus for accessibility.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    closeBtnRef.current?.focus()
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div
+      className="modal-overlay"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="help-title"
+    >
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>{t(locale, 'helpTitle')}</h2>
-          <button onClick={onClose} className="modal-close" aria-label="Close">
+          <h2 id="help-title">{t(locale, 'helpTitle')}</h2>
+          <button
+            ref={closeBtnRef}
+            onClick={onClose}
+            className="modal-close"
+            aria-label={t(locale, 'helpClose')}
+          >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />

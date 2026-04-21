@@ -10,8 +10,13 @@ function createWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 850,
+    // Below ~900×600 the stepper and content cards start to overflow; locking a
+    // minimum size keeps the layout pristine regardless of how the user drags.
+    minWidth: 900,
+    minHeight: 600,
     show: false,
     autoHideMenuBar: true,
+    backgroundColor: '#ffffff',
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
