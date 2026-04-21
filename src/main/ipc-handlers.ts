@@ -46,7 +46,11 @@ export function registerIpcHandlers(): void {
     if (result.canceled || result.filePaths.length === 0) return null
     const content = fs.readFileSync(result.filePaths[0], 'utf-8')
     const urls = content.split('\n').map((l) => l.trim()).filter((l) => l && l.startsWith('http'))
-    return urls.length > 0 ? urls : null
+    if (urls.length === 0) return null
+    lastCrawlUrlStatus = null
+    lastCrawlSeoUrls = urls
+    lastCrawlAllUrls = urls
+    return urls
   })
 
   /** Run Lighthouse analysis on a list of URLs */
@@ -79,8 +83,14 @@ export function registerIpcHandlers(): void {
       if (result.canceled || !result.filePath) return { success: false }
       try {
         const reportDate = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })
+        const urlStatus = lastCrawlUrlStatus ?? lastAnalysisResults.map((r) => ({
+          url: r.url,
+          status: r.lhr ? 200 : 0,
+          redirectTo: null,
+          label: r.lhr ? '✅ OK' : '❌ Error'
+        }))
         const buffer = await generateExcelReport(
-          lastCrawlUrlStatus,
+          urlStatus,
           lastAnalysisResults,
           locale,
           reportDate,
