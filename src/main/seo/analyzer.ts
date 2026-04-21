@@ -439,7 +439,8 @@ async function ensureHealthyBrowser(
 export async function analyzeUrls(
   urls: string[],
   onProgress: (p: AnalysisProgress) => void,
-  abortSignal?: { aborted: boolean }
+  abortSignal?: { aborted: boolean },
+  onPartial?: (results: AnalysisResult[]) => void
 ): Promise<AnalysisResult[]> {
   if (urls.length === 0) return []
 
@@ -499,6 +500,9 @@ export async function analyzeUrls(
       const tech = await getTechChecks(url)
 
       allResults.push({ url, lhr, meta, tech })
+      // Surface completed rows to the caller so an abort mid-run still leaves
+      // behind a usable partial report instead of discarding everything.
+      onPartial?.(allResults.slice())
 
       const perfScore = lhr ? pct(lhr.categories?.performance?.score) : 'N/A'
       const seoScore = lhr ? pct(lhr.categories?.seo?.score) : 'N/A'

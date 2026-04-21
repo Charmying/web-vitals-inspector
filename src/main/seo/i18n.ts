@@ -244,7 +244,7 @@ export function getLabels(locale: Locale): Labels {
         statusOk: '✅ OK',
         statusRedirect: '↩️ Redirect',
         status4xx: '⚠ 4xx',
-        status5xx: '💀  5xx',
+        status5xx: '💀 5xx',
         statusErr: '❌ Error'
       }
 }

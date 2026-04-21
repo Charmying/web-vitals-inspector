@@ -219,10 +219,32 @@ function generateIssuesSheet(wb: ExcelJS.Workbook, sheetName: string, results: A
       }
     }
 
-    // P0: Indexing
+    // Tech-level rules are always safe to report — they rely on HTTP HEAD
+    // checks, not on reading the page HTML.
+    const techP0: [boolean, string, string, string][] = [
+      [!t.isHttps, 'missing-https', locale === 'zh' ? '網站使用 HTTP 而非 HTTPS' : 'Site uses HTTP instead of HTTPS', locale === 'zh' ? 'Google 明確降權 HTTP 網站' : 'Google explicitly downgrades HTTP sites']
+    ]
+    for (const [cond, id, title, desc] of techP0) {
+      if (!cond) continue
+      push(url, labels.customRule, labels.p0Indexing, id, title, desc, labels.missing, '', '', 'P0', 'Critical')
+    }
+    const techP1: [boolean, string, string, string][] = [
+      [!t.robotsTxtOk, 'robots-txt-missing', locale === 'zh' ? '缺少 /robots.txt' : 'Missing /robots.txt', locale === 'zh' ? '爬蟲行為無法控制' : 'Crawler behavior uncontrolled'],
+      [!t.sitemapOk, 'sitemap-missing', locale === 'zh' ? '缺少 /sitemap.xml' : 'Missing /sitemap.xml', locale === 'zh' ? '新頁面被發現速度慢' : 'New pages discovered slowly']
+    ]
+    for (const [cond, id, title, desc] of techP1) {
+      if (!cond) continue
+      push(url, labels.customRule, labels.p1Tech, id, title, desc, labels.missing, '', '', 'P1', 'High')
+    }
+
+    // If metadata extraction failed we have no grounds to claim any on-page
+    // rule was violated — skip to avoid polluting the report with false
+    // positives (e.g. "missing H1" on a page we never actually parsed).
+    if (meta === null) continue
+
+    // P0: On-page indexing rules (rely on parsed metadata)
     const metaObj = m as { canonical?: string | null; robots?: string; title?: string }
     const p0Issues: [boolean, string, string, string][] = [
-      [!t.isHttps, 'missing-https', locale === 'zh' ? '網站使用 HTTP 而非 HTTPS' : 'Site uses HTTP instead of HTTPS', locale === 'zh' ? 'Google 明確降權 HTTP 網站' : 'Google explicitly downgrades HTTP sites'],
       [!metaObj.canonical, 'missing-canonical', locale === 'zh' ? '缺少 Canonical 標籤' : 'Missing Canonical tag', locale === 'zh' ? '重複內容分散 PageRank' : 'Duplicate content dilutes PageRank'],
       [!!metaObj.robots?.includes('noindex'), 'noindex-page', locale === 'zh' ? '頁面設有 noindex' : 'Page has noindex', locale === 'zh' ? '完全不出現在搜尋結果' : 'Completely invisible in search results'],
       [!!metaObj.robots?.includes('nofollow'), 'page-nofollow', locale === 'zh' ? '頁面設有全頁 nofollow' : 'Page has full nofollow', locale === 'zh' ? 'PageRank 無法流動' : 'PageRank flow interrupted'],
@@ -233,10 +255,8 @@ function generateIssuesSheet(wb: ExcelJS.Workbook, sheetName: string, results: A
       push(url, labels.customRule, labels.p0Indexing, id, title, desc, labels.missing, '', '', 'P0', 'Critical')
     }
 
-    // P1: Technical SEO
+    // P1: Technical SEO rules that depend on HTML metadata
     const p1Issues: [boolean, string, string, string][] = [
-      [!t.robotsTxtOk, 'robots-txt-missing', locale === 'zh' ? '缺少 /robots.txt' : 'Missing /robots.txt', locale === 'zh' ? '爬蟲行為無法控制' : 'Crawler behavior uncontrolled'],
-      [!t.sitemapOk, 'sitemap-missing', locale === 'zh' ? '缺少 /sitemap.xml' : 'Missing /sitemap.xml', locale === 'zh' ? '新頁面被發現速度慢' : 'New pages discovered slowly'],
       [!(m as { viewport?: string | null }).viewport, 'missing-viewport', locale === 'zh' ? '缺少 viewport meta' : 'Missing viewport meta', locale === 'zh' ? '行動端版面異常' : 'Mobile layout broken']
     ]
     for (const [cond, id, title, desc] of p1Issues) {
@@ -333,17 +353,28 @@ function generateTopIssuesSheet(wb: ExcelJS.Workbook, sheetName: string, results
       }
     }
 
+    // When we don't even have metadata for a page, stop here — we have no
+    // basis to claim any on-page rule is violated and counting false positives
+    // would silently distort the Top Issues ranking.
+    const hasMeta = meta !== null
     const metaObj = m as { canonical?: string | null; robots?: string; title?: string; viewport?: string | null; description?: string | null; h1Count?: number; imgNoAlt?: number; wordCount?: number; schemas?: string[]; hasOgImage?: boolean; internalLinkCount?: number }
-    const rules: [boolean, string, string, string][] = [
+    const techRules: [boolean, string, string, string][] = [
       [!t.isHttps, 'missing-https', locale === 'zh' ? '缺少 HTTPS' : 'Missing HTTPS', 'P0'],
+      [!t.robotsTxtOk, 'robots-txt-missing', locale === 'zh' ? '缺少 robots.txt' : 'Missing robots.txt', 'P1'],
+      [!t.sitemapOk, 'sitemap-missing', locale === 'zh' ? '缺少 sitemap.xml' : 'Missing sitemap.xml', 'P1']
+    ]
+    for (const [cond, id, title, priority] of techRules) {
+      if (cond) add(url, id, title, labels.customRule, priority)
+    }
+
+    if (!hasMeta) continue
+    const metaRules: [boolean, string, string, string][] = [
       [!metaObj.canonical, 'missing-canonical', locale === 'zh' ? '缺少 Canonical' : 'Missing Canonical', 'P0'],
       [!!metaObj.robots?.includes('noindex'), 'noindex-page', locale === 'zh' ? '頁面 noindex' : 'Page noindex', 'P0'],
       [!metaObj.title, 'missing-title', locale === 'zh' ? '缺少 Title' : 'Missing Title', 'P0'],
-      [!t.robotsTxtOk, 'robots-txt-missing', locale === 'zh' ? '缺少 robots.txt' : 'Missing robots.txt', 'P1'],
-      [!t.sitemapOk, 'sitemap-missing', locale === 'zh' ? '缺少 sitemap.xml' : 'Missing sitemap.xml', 'P1'],
       [!metaObj.viewport, 'missing-viewport', locale === 'zh' ? '缺少 Viewport' : 'Missing Viewport', 'P1'],
       [!metaObj.description, 'missing-description', locale === 'zh' ? '缺少 Description' : 'Missing Description', 'P2'],
-      [(metaObj.h1Count ?? 1) === 0, 'missing-h1', locale === 'zh' ? '缺少 H1' : 'Missing H1', 'P2'],
+      [(metaObj.h1Count ?? 0) === 0, 'missing-h1', locale === 'zh' ? '缺少 H1' : 'Missing H1', 'P2'],
       [(metaObj.h1Count ?? 0) > 1, 'multiple-h1', locale === 'zh' ? 'H1 過多' : 'Too many H1', 'P2'],
       [(metaObj.imgNoAlt ?? 0) > 0, 'img-missing-alt', locale === 'zh' ? '圖片缺 alt' : 'Images missing alt', 'P2'],
       [(metaObj.wordCount ?? 999) < 300, 'thin-content', locale === 'zh' ? '內容過薄' : 'Thin content', 'P2'],
@@ -351,7 +382,7 @@ function generateTopIssuesSheet(wb: ExcelJS.Workbook, sheetName: string, results
       [!metaObj.hasOgImage, 'missing-og-image', locale === 'zh' ? '缺少 og:image' : 'Missing og:image', 'P3'],
       [metaObj.internalLinkCount === 0, 'no-internal-links', locale === 'zh' ? '無內部連結' : 'No internal links', 'P3']
     ]
-    for (const [cond, id, title, priority] of rules) {
+    for (const [cond, id, title, priority] of metaRules) {
       if (cond) add(url, id, title, labels.customRule, priority)
     }
   }

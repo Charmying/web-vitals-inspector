@@ -464,8 +464,23 @@ export async function crawlUrls(rootUrl: string, onProgress: (p: CrawlProgress) 
 
     const urlStatusData: UrlStatusEntry[] = [...visited.entries()].map(([url, info]) => {
       const s = info?.status ?? 0
-      const label = !s ? '❌ Error' : s < 300 ? '✅ OK' : s < 400 ? '↩️ Redirect' : s < 500 ? '⚠ 4xx' : '💀 5xx'
-      return { url, status: s, redirectTo: info?.redirectTo ?? null, label }
+      const redirectTo = info?.redirectTo ?? null
+      // If puppeteer resolved to a different URL the transport-level status may
+      // already be 200 (a browser auto-follows 30x). Surfacing "Redirect"
+      // whenever the final URL differs from the requested one gives an honest
+      // picture to the user, independent of the reported status code.
+      const label = !s
+        ? '❌ Error'
+        : redirectTo
+          ? '↩️ Redirect'
+          : s < 300
+            ? '✅ OK'
+            : s < 400
+              ? '↩️ Redirect'
+              : s < 500
+                ? '⚠ 4xx'
+                : '💀 5xx'
+      return { url, status: s, redirectTo, label }
     })
 
     onProgress({
