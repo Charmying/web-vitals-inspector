@@ -2,6 +2,8 @@
 
 **English** | [繁體中文](./README.zh-TW.md)
 
+[Page Function Description](./docs/page-function-description/page-function-description.md) — Page functionality overview
+
 A professional desktop application for auditing website SEO and Core Web Vitals at scale. Built with Electron, it crawls an entire website, runs Lighthouse analysis on every page, and exports a comprehensive multi-sheet Excel report — all with a clean, bilingual UI.
 
 ---

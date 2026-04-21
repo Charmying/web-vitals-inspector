@@ -2,6 +2,8 @@
 
 [English](./README.md) | **繁體中文**
 
+[頁面功能說明](./docs/page-function-description/page-function-description.zh-TW.md) — 各頁面功能簡介
+
 一款專業的桌面應用程式，用於大規模審計網站 SEO 與核心網頁指標 (Core Web Vitals)。基於 Electron 構建，可自動爬取整個網站、對每個頁面執行 Lighthouse 分析，並匯出一份完整的多工作表 Excel 報告——提供簡潔的雙語 UI。
 
 ---
