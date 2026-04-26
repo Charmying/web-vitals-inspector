@@ -18,7 +18,7 @@ export interface AnalysisProgress {
 
 export interface UrlStatusEntry {
   url: string
-  status: number
+  status: number | null
   redirectTo: string | null
   label: string
 }
