@@ -5,6 +5,15 @@ import { crawlUrls } from './seo/crawler'
 import { analyzeUrls } from './seo/analyzer'
 import { generateExcelReport } from './seo/report-generator'
 import type { Locale, UrlStatusEntry, AnalysisResult } from './seo/types'
+import {
+  isHttpUrl,
+  type DownloadUrlsResult,
+  type ParseUrlsFileResult,
+  type SaveReportResult
+} from '../shared/ipc'
+
+const MAX_URL_FILE_BYTES = 5 * 1024 * 1024
+const MAX_URL_COUNT = 10000
 
 /** Shared state across IPC calls — reset at the start of each long-running job */
 let lastCrawlUrlStatus: UrlStatusEntry[] | null = null
@@ -12,7 +21,9 @@ let lastCrawlSeoUrls: string[] = []
 let lastCrawlAllUrls: string[] = []
 let lastAnalysisResults: AnalysisResult[] = []
 let analysisStartTime = 0
+let analysisDurationMs = 0
 let abortController: { aborted: boolean } = { aborted: false }
+let activeJobId = 0
 
 /** Strip UTF-8 BOM (common when .txt is saved from Windows Notepad) */
 function stripBom(s: string): string {
@@ -44,13 +55,39 @@ function localeDateTime(d = new Date()): string {
   return `${d.toLocaleDateString()} ${d.toLocaleTimeString()}`
 }
 
+function sanitizeUrls(inputs: string[]): string[] {
+  const seen = new Set<string>()
+  const urls: string[] = []
+
+  for (const raw of inputs) {
+    const line = raw.trim()
+    if (!line || !isHttpUrl(line)) continue
+    if (seen.has(line)) continue
+    seen.add(line)
+    urls.push(line)
+    if (urls.length >= MAX_URL_COUNT) break
+  }
+
+  return urls
+}
+
+function beginJob(): { jobId: number; signal: { aborted: boolean } } {
+  activeJobId += 1
+  abortController = { aborted: false }
+  return { jobId: activeJobId, signal: abortController }
+}
+
 /** Register all IPC handlers for the SEO analysis workflow */
 export function registerIpcHandlers(): void {
   /** Start website crawl to discover URLs */
   ipcMain.handle(
     'seo:start-crawl',
-    async (event, rootUrl: string): Promise<{ seoUrls: string[]; allUrls: string[] }> => {
-      abortController = { aborted: false }
+    async (event, rootUrl: string, locale?: 'en' | 'zh'): Promise<{ seoUrls: string[]; allUrls: string[] }> => {
+      if (!isHttpUrl(rootUrl)) {
+        throw new Error('Invalid root URL. Only http:// and https:// URLs are allowed.')
+      }
+
+      const { jobId, signal } = beginJob()
       // Reset crawl state so stale data never leaks into a fresh run
       lastCrawlUrlStatus = null
       lastCrawlSeoUrls = []
@@ -58,10 +95,15 @@ export function registerIpcHandlers(): void {
       const result = await crawlUrls(
         rootUrl,
         (progress) => {
+          if (jobId !== activeJobId || signal.aborted) return
           event.sender.send('seo:progress', { type: 'crawl', ...progress })
         },
-        abortController
+        signal,
+        locale === 'en' ? 'en' : 'zh'
       )
+      if (jobId !== activeJobId || signal.aborted) {
+        throw new Error('Crawl aborted or superseded by a newer job.')
+      }
       lastCrawlUrlStatus = result.urlStatusData
       lastCrawlSeoUrls = result.seoUrls
       lastCrawlAllUrls = result.allUrls
@@ -70,74 +112,118 @@ export function registerIpcHandlers(): void {
   )
 
   /** Open file dialog and parse a .txt file containing URLs (one per line) */
-  ipcMain.handle('seo:parse-urls-file', async (): Promise<string[] | null> => {
+  ipcMain.handle('seo:parse-urls-file', async (): Promise<ParseUrlsFileResult> => {
     const win = BrowserWindow.getFocusedWindow()
-    if (!win) return null
+    if (!win) return { status: 'error', reason: 'no-window' }
     const result = await dialog.showOpenDialog(win, {
       title: 'Select URL list file',
       filters: [{ name: 'Text Files', extensions: ['txt'] }],
       properties: ['openFile']
     })
-    if (result.canceled || result.filePaths.length === 0) return null
+    if (result.canceled || result.filePaths.length === 0) return { status: 'cancelled' }
 
     let content: string
     try {
-      content = fs.readFileSync(result.filePaths[0], 'utf-8')
+      const stat = fs.statSync(result.filePaths[0])
+      if (stat.size > MAX_URL_FILE_BYTES) {
+        console.error('[ipc] URL list file is too large:', stat.size)
+        return { status: 'error', reason: 'too-large' }
+      }
+
+      const buf = fs.readFileSync(result.filePaths[0])
+      if (buf.includes(0x00)) {
+        console.error('[ipc] URL list file appears to be binary, aborting parse.')
+        return { status: 'error', reason: 'binary' }
+      }
+
+      content = buf.toString('utf-8')
     } catch (err) {
       console.error('[ipc] Failed to read URL list file:', (err as Error).message)
-      return null
+      return {
+        status: 'error',
+        reason: 'read-failed',
+        message: (err as Error).message
+      }
     }
 
-    // Strip BOM, normalize line endings, dedupe while preserving order.
-    const seen = new Set<string>()
-    const urls: string[] = []
-    for (const raw of stripBom(content).split(/\r?\n/)) {
-      const line = raw.trim()
-      if (!line || !/^https?:\/\//i.test(line)) continue
-      if (seen.has(line)) continue
-      seen.add(line)
-      urls.push(line)
+    const urls = sanitizeUrls(stripBom(content).split(/\r?\n/))
+    if (urls.length === 0) {
+      return { status: 'error', reason: 'no-valid-urls' }
     }
-    if (urls.length === 0) return null
 
     lastCrawlUrlStatus = null
     lastCrawlSeoUrls = urls
     lastCrawlAllUrls = urls
-    return urls
+    return { status: 'loaded', urls }
   })
 
   /** Run Lighthouse analysis on a list of URLs */
   ipcMain.handle(
     'seo:start-analysis',
     async (event, urls: string[]): Promise<AnalysisResult[]> => {
-      abortController = { aborted: false }
+      const cleanUrls = sanitizeUrls(Array.isArray(urls) ? urls : [])
+      if (cleanUrls.length === 0) {
+        throw new Error('No valid URLs to analyze.')
+      }
+
+      // If the URLs being analyzed are unrelated to the last crawl (e.g. single-URL
+      // mode, or the user reset and started a new workflow), reset stale crawl state
+      // so Sheet 1 of the report does not show data from a completely different run.
+      const crawlAllUrlSet = new Set(lastCrawlAllUrls)
+      const isFromCurrentCrawl =
+        crawlAllUrlSet.size > 0 && cleanUrls.every((u) => crawlAllUrlSet.has(u))
+      if (!isFromCurrentCrawl) {
+        lastCrawlUrlStatus = null
+        lastCrawlSeoUrls = cleanUrls
+        lastCrawlAllUrls = cleanUrls
+      }
+
+      const { jobId, signal } = beginJob()
       analysisStartTime = Date.now()
+      analysisDurationMs = 0
       // Clear previous results so a failed/partial run never bleeds into the report
       lastAnalysisResults = []
       // `onPartial` lets the analyzer hand us completed rows as they arrive —
       // if the user aborts mid-run we keep whatever finished, so a partial
       // report is still available.
-      const results = await analyzeUrls(
-        urls,
-        (progress) => {
-          event.sender.send('seo:progress', { type: 'analysis', ...progress })
-        },
-        abortController,
-        (partial) => {
-          lastAnalysisResults = partial
+      try {
+        const results = await analyzeUrls(
+          cleanUrls,
+          (progress) => {
+            if (jobId !== activeJobId || signal.aborted) return
+            event.sender.send('seo:progress', { type: 'analysis', ...progress })
+          },
+          signal,
+          (partial) => {
+            if (jobId !== activeJobId || signal.aborted) return
+            lastAnalysisResults = partial
+          }
+        )
+        if (jobId !== activeJobId || signal.aborted) {
+          throw new Error('Analysis aborted or superseded by a newer job.')
         }
-      )
-      lastAnalysisResults = results
-      return results
+        lastAnalysisResults = results
+        return results
+      } finally {
+        if (jobId === activeJobId && analysisStartTime > 0) {
+          analysisDurationMs = Math.max(Date.now() - analysisStartTime, 0)
+        }
+      }
     }
   )
 
   /** Generate Excel report and save to user-selected path */
   ipcMain.handle(
     'seo:save-report',
-    async (_event, locale: Locale): Promise<{ success: boolean; filePath?: string }> => {
+    async (_event, locale: Locale): Promise<SaveReportResult> => {
+      if (locale !== 'en' && locale !== 'zh') {
+        throw new Error('Unsupported report locale.')
+      }
+
       const win = BrowserWindow.getFocusedWindow()
-      if (!win) return { success: false }
+      if (!win) {
+        return { status: 'error', message: 'No active application window.' }
+      }
 
       // Suggest a filename that embeds the audited hostname + local timestamp —
       // far more useful than a generic name when a user keeps many reports.
@@ -154,7 +240,7 @@ export function registerIpcHandlers(): void {
         defaultPath: defaultName,
         filters: [{ name: 'Excel Files', extensions: ['xlsx'] }]
       })
-      if (result.canceled || !result.filePath) return { success: false }
+      if (result.canceled || !result.filePath) return { status: 'cancelled' }
 
       try {
         const reportDate = localeDateTime()
@@ -162,31 +248,42 @@ export function registerIpcHandlers(): void {
           lastCrawlUrlStatus ??
           lastAnalysisResults.map((r) => ({
             url: r.url,
-            status: r.lhr ? 200 : 0,
+            status: null,
             redirectTo: null,
-            label: r.lhr ? '✅ OK' : '❌ Error'
+            label:
+              locale === 'zh'
+                ? 'ℹ 僅分析，未執行爬取'
+                : 'ℹ Analysis only, not crawled'
           }))
         const buffer = await generateExcelReport(
           urlStatus,
           lastAnalysisResults,
           locale,
           reportDate,
-          analysisStartTime || Date.now()
+          analysisDurationMs
         )
         fs.writeFileSync(result.filePath, buffer)
-        return { success: true, filePath: result.filePath }
+        return { status: 'saved', filePath: result.filePath }
       } catch (err) {
         console.error('[ipc] Report generation failed:', err)
-        return { success: false }
+        return {
+          status: 'error',
+          message: err instanceof Error ? err.message : String(err)
+        }
       }
     }
   )
 
   /** Download the crawled URL list as a .txt file */
-  ipcMain.handle('seo:download-urls', async (_event, type: 'seo' | 'all'): Promise<boolean> => {
+  ipcMain.handle('seo:download-urls', async (_event, type: 'seo' | 'all'): Promise<DownloadUrlsResult> => {
+    if (type !== 'seo' && type !== 'all') {
+      return { status: 'error', message: 'Invalid download type.' }
+    }
+
     const urls = type === 'seo' ? lastCrawlSeoUrls : lastCrawlAllUrls
     const win = BrowserWindow.getFocusedWindow()
-    if (!win || urls.length === 0) return false
+    if (!win) return { status: 'error', message: 'No active application window.' }
+    if (urls.length === 0) return { status: 'error', message: 'No URLs available to download.' }
 
     const host = urls[0] ? `-${safeHostname(urls[0])}` : ''
     const defaultName =
@@ -197,15 +294,18 @@ export function registerIpcHandlers(): void {
       defaultPath: defaultName,
       filters: [{ name: 'Text Files', extensions: ['txt'] }]
     })
-    if (result.canceled || !result.filePath) return false
+    if (result.canceled || !result.filePath) return { status: 'cancelled' }
     try {
       // Use platform-native newlines so the file opens cleanly in Notepad.
       const eol = process.platform === 'win32' ? '\r\n' : '\n'
       fs.writeFileSync(result.filePath, urls.join(eol), 'utf-8')
-      return true
+      return { status: 'saved', filePath: result.filePath, count: urls.length }
     } catch (err) {
       console.error('[ipc] Failed to write URL list:', (err as Error).message)
-      return false
+      return {
+        status: 'error',
+        message: err instanceof Error ? err.message : String(err)
+      }
     }
   })
 

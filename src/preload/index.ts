@@ -1,13 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import type { DownloadUrlsResult, ParseUrlsFileResult, SaveReportResult } from '../shared/ipc'
 
 /** API bridge between main process and renderer */
 const api = {
-  startCrawl: (rootUrl: string) => ipcRenderer.invoke('seo:start-crawl', rootUrl),
-  parseUrlsFile: () => ipcRenderer.invoke('seo:parse-urls-file'),
+  startCrawl: (rootUrl: string, locale?: 'en' | 'zh') => ipcRenderer.invoke('seo:start-crawl', rootUrl, locale),
+  parseUrlsFile: (): Promise<ParseUrlsFileResult> => ipcRenderer.invoke('seo:parse-urls-file'),
   startAnalysis: (urls: string[]) => ipcRenderer.invoke('seo:start-analysis', urls),
-  saveReport: (locale: string) => ipcRenderer.invoke('seo:save-report', locale),
-  downloadUrls: (type: 'seo' | 'all') => ipcRenderer.invoke('seo:download-urls', type),
+  saveReport: (locale: 'en' | 'zh'): Promise<SaveReportResult> => ipcRenderer.invoke('seo:save-report', locale),
+  downloadUrls: (type: 'seo' | 'all'): Promise<DownloadUrlsResult> => ipcRenderer.invoke('seo:download-urls', type),
   abort: () => ipcRenderer.invoke('seo:abort'),
   onProgress: (callback: (data: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: unknown): void => callback(data)
