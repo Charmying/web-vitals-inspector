@@ -288,6 +288,8 @@ async function crawlPage(page: Page, url: string, visited: Map<string, { status:
   try {
     const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
     const status = response?.status() ?? 0
+    const contentType = response?.headers()['content-type'] ?? ''
+    const isHtmlResponse = /text\/html|application\/xhtml\+xml/i.test(contentType)
     let redirectTo: string | null = null
     if (status >= 200 && status < 400 && isInternal(page.url(), rootHostNoWww)) {
       await new Promise((r) => setTimeout(r, 2500))
@@ -297,7 +299,7 @@ async function crawlPage(page: Page, url: string, visited: Map<string, { status:
     }
     visited.set(url, { status, redirectTo })
     if (await isLoginWall(page)) return
-    if (status >= 200 && status < 400 && isInternal(page.url(), rootHostNoWww)) {
+    if (status >= 200 && status < 400 && isInternal(page.url(), rootHostNoWww) && isHtmlResponse) {
       const rawLinks: string[] = await page.evaluate(() => {
         const urls: string[] = []
         const push = (v: string | null): void => {
@@ -331,7 +333,7 @@ async function crawlPage(page: Page, url: string, visited: Map<string, { status:
 }
 
 /** Main crawl entry point — orchestrate seed collection, recursive crawl, and result assembly */
-export async function crawlUrls(rootUrl: string, onProgress: (p: CrawlProgress) => void, abortSignal?: { aborted: boolean }): Promise<CrawlResult> {
+export async function crawlUrls(rootUrl: string, onProgress: (p: CrawlProgress) => void, abortSignal?: { aborted: boolean }, locale: 'en' | 'zh' = 'zh'): Promise<CrawlResult> {
   const ROOT_URL = rootUrl.replace(/\/?$/, '/')
   const DOMAIN = new URL(ROOT_URL).hostname
   const ROOT_HOST_NO_WWW = DOMAIN.replace(/^www\./i, '')
@@ -344,7 +346,7 @@ export async function crawlUrls(rootUrl: string, onProgress: (p: CrawlProgress) 
   const seen = new Set<string>()
   const queue: string[] = []
 
-  onProgress({ phase: 'crawl', current: 0, total: 0, message: '啟動瀏覽器...' })
+  onProgress({ phase: 'crawl', current: 0, total: 0, message: locale === 'zh' ? '啟動瀏覽器...' : 'Launching browser...' })
 
   const browser = await puppeteer.launch({
     headless: true,
@@ -357,7 +359,7 @@ export async function crawlUrls(rootUrl: string, onProgress: (p: CrawlProgress) 
 
   try {
     // Phase 1: Seed collection
-    onProgress({ phase: 'seeds', current: 0, total: 4, message: '收集種子 URL（Sitemap）...' })
+    onProgress({ phase: 'seeds', current: 0, total: 4, message: locale === 'zh' ? '收集種子 URL（Sitemap）...' : 'Collecting seed URLs (Sitemap)...' })
 
     const [sitemapUrls, waybackUrls] = await Promise.all([
       fetchSitemapUrls(ROOT_URL, ROOT_HOST_NO_WWW, analyzer),
@@ -366,7 +368,7 @@ export async function crawlUrls(rootUrl: string, onProgress: (p: CrawlProgress) 
 
     if (abortSignal?.aborted) throw new Error('Aborted')
 
-    onProgress({ phase: 'seeds', current: 2, total: 4, message: '搜尋引擎種子（Google/Bing）...' })
+    onProgress({ phase: 'seeds', current: 2, total: 4, message: locale === 'zh' ? '搜尋引擎種子（Google/Bing）...' : 'Collecting seeds from search engines (Google/Bing)...' })
 
     const [googleUrls, bingUrls] = await Promise.all([
       fetchSearchEngineUrls(browser, 'google', DOMAIN, ROOT_URL, ROOT_HOST_NO_WWW, analyzer),
@@ -391,7 +393,7 @@ export async function crawlUrls(rootUrl: string, onProgress: (p: CrawlProgress) 
       phase: 'seeds',
       current: 4,
       total: 4,
-      message: `種子收集完成：${queue.length} 個 URL`
+      message: locale === 'zh' ? `種子收集完成：${queue.length} 個 URL` : `Seeds collected: ${queue.length} URLs`
     })
 
     // Phase 2: Recursive crawl
@@ -437,7 +439,7 @@ export async function crawlUrls(rootUrl: string, onProgress: (p: CrawlProgress) 
         phase: 'crawl',
         current: visited.size,
         total: visited.size + queue.length,
-        message: `Crawled ${visited.size} pages / Queue ${queue.length} | 已爬取 ${visited.size} 頁 / 佇列 ${queue.length}`
+        message: locale === 'zh' ? `已爬取 ${visited.size} 頁 / 佇列 ${queue.length}` : `Crawled ${visited.size} pages / Queue ${queue.length}`
       })
 
       await new Promise((r) => setTimeout(r, 50))
@@ -487,7 +489,7 @@ export async function crawlUrls(rootUrl: string, onProgress: (p: CrawlProgress) 
       phase: 'done',
       current: visited.size,
       total: visited.size,
-      message: `Crawl complete! ${visited.size} URLs, ${seoImpactUrls.length} SEO audit URLs | 爬取完成！共 ${visited.size} 個 URL，${seoImpactUrls.length} 個 SEO 審計 URL`
+      message: locale === 'zh' ? `爬取完成！共 ${visited.size} 個 URL，${seoImpactUrls.length} 個 SEO 審計 URL` : `Crawl complete! ${visited.size} URLs, ${seoImpactUrls.length} SEO audit URLs`
     })
 
     return { seoUrls: seoImpactUrls, allUrls, urlStatusData }

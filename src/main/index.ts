@@ -1,9 +1,10 @@
 /** Electron main process entry point — creates the browser window and registers IPC handlers */
-import { app, shell, BrowserWindow } from 'electron'
+import { app, shell, BrowserWindow, nativeTheme } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { registerIpcHandlers } from './ipc-handlers'
+import { isHttpUrl } from '../shared/ipc'
 
 /** Create the main application window */
 function createWindow(): void {
@@ -16,11 +17,14 @@ function createWindow(): void {
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#ffffff',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#09090b' : '#ffffff',
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      contextIsolation: true,
+      nodeIntegration: false,
+      webviewTag: false,
+      sandbox: true
     }
   })
 
@@ -29,8 +33,18 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    if (isHttpUrl(details.url)) {
+      shell.openExternal(details.url)
+    }
     return { action: 'deny' }
+  })
+
+  // Prevent renderer-initiated navigations from replacing the app shell.
+  mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
+    event.preventDefault()
+    if (isHttpUrl(navigationUrl)) {
+      shell.openExternal(navigationUrl)
+    }
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -41,7 +55,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('com.electron')
+  electronApp.setAppUserModelId('com.webvitalsinspector.app')
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
