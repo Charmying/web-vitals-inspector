@@ -3,6 +3,7 @@ import { useTheme } from './hooks/useTheme'
 import { ThemeToggle } from './components/ThemeToggle'
 import { HelpModal } from './components/HelpModal'
 import { t, type UILocale } from './i18n'
+import { isHttpUrl } from '../../shared/ipc'
 
 type Mode = 'crawl' | 'single' | 'upload'
 type Step = 'input' | 'urls' | 'settings' | 'running' | 'done'
@@ -42,14 +43,25 @@ function App(): React.JSX.Element {
   const [progress, setProgress] = useState<ProgressData | null>(null)
   const [logs, setLogs] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [isRunning, setIsRunning] = useState(false)
   const [isCrawling, setIsCrawling] = useState(false)
   const [analysisComplete, setAnalysisComplete] = useState(false)
+  const [analysisWasPartial, setAnalysisWasPartial] = useState(false)
+  const [completedAnalysisCount, setCompletedAnalysisCount] = useState(0)
   const [saving, setSaving] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
   const logEndRef = useRef<HTMLDivElement>(null)
   const analysisStartRef = useRef<number>(0)
-
+  const completedAnalysisCountRef = useRef(0)
+  const helpBtnRef = useRef<HTMLButtonElement>(null)
+  // Tracks intentional user aborts so catch blocks don't surface a confusing error.
+  const isAbortingRef = useRef(false)
+  // Tracks full resets triggered while an async operation is in flight so async
+  // completions do not navigate away from the input screen after reset.
+  const isResettingRef = useRef(false)
+  // Monotonic token that invalidates stale async completions after reset/restart.
+  const workflowTokenRef = useRef(0)
   useEffect(() => {
     localStorage.setItem('wvi-locale', uiLocale)
     document.documentElement.setAttribute('lang', uiLocale === 'zh' ? 'zh-Hant' : 'en')
@@ -77,6 +89,13 @@ function App(): React.JSX.Element {
       if (p.type === 'crawl' && p.message) {
         addLog(p.message)
       } else if (p.type === 'analysis' && p.currentUrl) {
+        if (p.perfScore !== undefined || p.seoScore !== undefined) {
+          setCompletedAnalysisCount((prev) => {
+            const next = Math.max(prev, p.current)
+            completedAnalysisCountRef.current = next
+            return next
+          })
+        }
         const extra =
           p.perfScore && p.seoScore ? ` → Perf: ${p.perfScore} | SEO: ${p.seoScore}` : ''
         addLog(`[${p.current}/${p.total}] ${p.currentUrl}${extra}`)
@@ -93,8 +112,12 @@ function App(): React.JSX.Element {
   /** Handle start button click based on current mode */
   const handleStart = async (): Promise<void> => {
     setError(null)
+    setNotice(null)
     setLogs([])
     setProgress(null)
+    setAnalysisWasPartial(false)
+    setCompletedAnalysisCount(0)
+    completedAnalysisCountRef.current = 0
 
     if (!window.api) {
       setError(t(uiLocale, 'errorApiBridge'))
@@ -102,15 +125,16 @@ function App(): React.JSX.Element {
     }
 
     if (mode === 'single') {
-      if (!url.trim() || !/^https?:\/\//i.test(url.trim())) {
+      const normalized = url.trim()
+      if (!normalized || !isHttpUrl(normalized)) {
         setError(t(uiLocale, 'errorInvalidUrl'))
         return
       }
-      setUrls([url.trim()])
-      setAllCrawledUrls([url.trim()])
+      setUrls([normalized])
+      setAllCrawledUrls([normalized])
       setCrawledSeoUrls([])
       setStep('settings')
-      addLog(`${t(uiLocale, 'single')} ${url.trim()}`)
+      addLog(`${t(uiLocale, 'single')} ${normalized}`)
       return
     }
 
@@ -118,44 +142,80 @@ function App(): React.JSX.Element {
       addLog(`${t(uiLocale, 'selectFile')}...`)
       try {
         const parsed = await window.api.parseUrlsFile()
-        if (!parsed || parsed.length === 0) {
-          setError(t(uiLocale, 'errorNoFile'))
+        if (parsed.status === 'cancelled') {
           return
         }
-        setUrls(parsed)
-        setAllCrawledUrls(parsed)
+        if (parsed.status === 'error') {
+          switch (parsed.reason) {
+            case 'too-large':
+              setError(t(uiLocale, 'errorFileTooLarge'))
+              break
+            case 'binary':
+              setError(t(uiLocale, 'errorFileBinary'))
+              break
+            case 'no-valid-urls':
+              setError(t(uiLocale, 'errorNoValidUrls'))
+              break
+            case 'read-failed':
+              setError(
+                parsed.message
+                  ? `${t(uiLocale, 'errorFileRead')} ${parsed.message}`
+                  : t(uiLocale, 'errorFileRead')
+              )
+              break
+            case 'no-window':
+              setError(t(uiLocale, 'errorWindowUnavailable'))
+              break
+          }
+          return
+        }
+        setUrls(parsed.urls)
+        setAllCrawledUrls(parsed.urls)
         setCrawledSeoUrls([])
-        addLog(t(uiLocale, 'fileLoaded', { count: parsed.length }))
+        addLog(t(uiLocale, 'fileLoaded', { count: parsed.urls.length }))
         setStep('urls')
       } catch (err) {
-        setError(`${t(uiLocale, 'errorNoFile')} ${(err as Error).message}`)
+        setError(`${t(uiLocale, 'errorFileRead')} ${(err as Error).message}`)
       }
       return
     }
 
-    if (!url.trim() || !/^https?:\/\//i.test(url.trim())) {
+    const normalized = url.trim()
+    if (!normalized || !isHttpUrl(normalized)) {
       setError(t(uiLocale, 'errorInvalidUrl'))
       return
     }
 
     setIsCrawling(true)
     setIsRunning(true)
-    addLog(`${t(uiLocale, 'crawlStart')} ${url.trim()}`)
+    isAbortingRef.current = false
+    isResettingRef.current = false
+    const workflowToken = ++workflowTokenRef.current
+    addLog(`${t(uiLocale, 'crawlStart')} ${normalized}`)
 
     try {
-      const result = await window.api.startCrawl(url.trim())
+      const result = await window.api.startCrawl(normalized, uiLocale)
+      if (workflowToken !== workflowTokenRef.current) return
       setCrawledSeoUrls(result.seoUrls)
       setAllCrawledUrls(result.allUrls)
       setUrls(result.seoUrls)
       setUrlFilter('seo')
       setIsCrawling(false)
       setIsRunning(false)
-      addLog(t(uiLocale, 'crawlComplete', { count: result.seoUrls.length }))
-      setStep('urls')
+      if (!isResettingRef.current) {
+        addLog(t(uiLocale, 'crawlComplete', { count: result.seoUrls.length }))
+        setStep('urls')
+      }
+      isResettingRef.current = false
     } catch (err) {
+      if (workflowToken !== workflowTokenRef.current) return
       setIsCrawling(false)
       setIsRunning(false)
-      setError(`${t(uiLocale, 'crawlFailed')} ${(err as Error).message}`)
+      if (!isAbortingRef.current) {
+        setError(`${t(uiLocale, 'crawlFailed')} ${(err as Error).message}`)
+      }
+      isAbortingRef.current = false
+      isResettingRef.current = false
     }
   }
 
@@ -166,27 +226,59 @@ function App(): React.JSX.Element {
       return
     }
     setError(null)
+    setNotice(null)
     setIsRunning(true)
     setStep('running')
     setAnalysisComplete(false)
+    setAnalysisWasPartial(false)
+    setCompletedAnalysisCount(0)
+    completedAnalysisCountRef.current = 0
+    isAbortingRef.current = false
+    isResettingRef.current = false
+    const workflowToken = ++workflowTokenRef.current
+    // Reset stale crawl progress so the heading never shows "Crawling..." during analysis
+    setProgress(null)
     analysisStartRef.current = Date.now()
     addLog(t(uiLocale, 'analysisStart', { count: urls.length }))
     addLog(`${t(uiLocale, 'reportLangLog')} ${reportLocale === 'zh' ? '中文' : 'English'}`)
 
     try {
       await window.api.startAnalysis(urls)
+      if (workflowToken !== workflowTokenRef.current) return
       setIsRunning(false)
-      setAnalysisComplete(true)
-      setStep('done')
-      addLog(t(uiLocale, 'analysisDone'))
+      setAnalysisWasPartial(false)
+      setCompletedAnalysisCount(urls.length)
+      completedAnalysisCountRef.current = urls.length
+      if (!isResettingRef.current) {
+        setAnalysisComplete(true)
+        setStep('done')
+        addLog(t(uiLocale, 'analysisDone'))
+      }
+      isResettingRef.current = false
     } catch (err) {
+      if (workflowToken !== workflowTokenRef.current) return
       // Keep user on `done` step so any partial results collected by the main
       // process can still be saved as a report — a far better UX than losing
-      // the entire run on a timeout or user-initiated abort.
+      // the entire run on a timeout or user-initiated abort. Skip the navigation
+      // if the user explicitly reset — handleReset already switched to 'input'.
       setIsRunning(false)
-      setAnalysisComplete(true)
-      setStep('done')
-      setError(`${t(uiLocale, 'analysisFailed')} ${(err as Error).message}`)
+      if (isAbortingRef.current && !isResettingRef.current) {
+        addLog(t(uiLocale, 'aborted'))
+      }
+      if (!isResettingRef.current) {
+        const doneCount = completedAnalysisCountRef.current
+        setAnalysisWasPartial(true)
+        if (doneCount > 0) {
+          addLog(t(uiLocale, 'analysisPartialLog', { done: doneCount, total: urls.length }))
+        }
+        setAnalysisComplete(true)
+        setStep('done')
+      }
+      if (!isAbortingRef.current) {
+        setError(`${t(uiLocale, 'analysisFailed')} ${(err as Error).message}`)
+      }
+      isAbortingRef.current = false
+      isResettingRef.current = false
     }
   }
 
@@ -200,10 +292,12 @@ function App(): React.JSX.Element {
     setError(null)
     try {
       const result = await window.api.saveReport(reportLocale)
-      if (result.success) {
+      if (result.status === 'saved') {
         addLog(`${t(uiLocale, 'saveSuccess')} ${result.filePath}`)
-      } else {
+      } else if (result.status === 'cancelled') {
         addLog(t(uiLocale, 'saveCancelled'))
+      } else {
+        setError(`${t(uiLocale, 'saveFailed')} ${result.message}`)
       }
     } catch (err) {
       setError(`${t(uiLocale, 'saveFailed')} ${(err as Error).message}`)
@@ -211,6 +305,10 @@ function App(): React.JSX.Element {
       setSaving(false)
     }
   }
+
+  /** Stable close handler for HelpModal — must not be recreated on every render
+   * to avoid triggering the modal's focus-management effect during rapid progress updates */
+  const handleCloseHelp = useCallback(() => setShowHelp(false), [])
 
   /** Switch between SEO-only and all-URLs views */
   const handleUrlFilterChange = (filter: 'seo' | 'all'): void => {
@@ -221,40 +319,67 @@ function App(): React.JSX.Element {
   /** Download URL list as .txt file via main process dialog */
   const handleDownloadUrls = async (type: 'seo' | 'all'): Promise<void> => {
     if (!window.api) return
-    await window.api.downloadUrls(type)
+    setError(null)
+    setNotice(null)
+    const result = await window.api.downloadUrls(type)
+    if (result.status === 'saved') {
+      setNotice(t(uiLocale, 'downloadSaved', { filePath: result.filePath }))
+      addLog(t(uiLocale, 'downloadSaved', { filePath: result.filePath }))
+      return
+    }
+    if (result.status === 'cancelled') {
+      setNotice(t(uiLocale, 'downloadCancelled'))
+      return
+    }
+    setError(`${t(uiLocale, 'downloadFailed')} ${result.message}`)
   }
 
   /** Abort current crawl or analysis operation */
   const handleAbort = async (): Promise<void> => {
     if (!window.api) return
+    isAbortingRef.current = true
     await window.api.abort()
     setIsCrawling(false)
-    setIsRunning(false)
-    addLog(t(uiLocale, 'aborted'))
     // When aborting a crawl, go back to input; when aborting an analysis, stay
-    // on `done` so the partial report is still reachable via Save.
+    // on the running screen until the main process flushes partial results.
     if (step === 'running') {
-      setAnalysisComplete(true)
-      setStep('done')
+      setIsRunning(false)
+      addLog(t(uiLocale, 'aborting'))
     } else {
+      setIsRunning(false)
+      addLog(t(uiLocale, 'aborted'))
       setStep('input')
     }
   }
 
-  /** Reset all state to initial values */
+  /** Reset all state to initial values — also aborts any in-flight operation */
   const handleReset = (): void => {
+    if (isRunning) {
+      workflowTokenRef.current += 1
+      isAbortingRef.current = true
+      isResettingRef.current = true
+      window.api?.abort()
+    }
     setStep('input')
+    setMode('crawl')
     setUrl('')
     setUrls([])
     setAllCrawledUrls([])
     setCrawledSeoUrls([])
     setUrlFilter('seo')
+    setReportLocale('zh')
     setProgress(null)
     setLogs([])
     setError(null)
+    setNotice(null)
     setIsRunning(false)
     setIsCrawling(false)
     setAnalysisComplete(false)
+    setAnalysisWasPartial(false)
+    setCompletedAnalysisCount(0)
+    completedAnalysisCountRef.current = 0
+    setSaving(false)
+    setShowHelp(false)
   }
 
   /** Calculate estimated time remaining for analysis */
@@ -287,6 +412,13 @@ function App(): React.JSX.Element {
       ? Math.min(Math.round((progress.current / progress.total) * 100), 100)
       : 0
 
+  const inputGuideText =
+    mode === 'crawl'
+      ? t(uiLocale, 'inputGuideCrawl')
+      : mode === 'single'
+        ? t(uiLocale, 'inputGuideSingle')
+        : t(uiLocale, 'inputGuideUpload')
+
   return (
     <div className="app">
       {/* Header with glass effect */}
@@ -298,21 +430,22 @@ function App(): React.JSX.Element {
             </h1>
           </div>
           <div className="header-controls">
-            <ThemeToggle theme={theme} onToggle={toggleTheme} />
+            <ThemeToggle theme={theme} onToggle={toggleTheme} label={t(uiLocale, 'themeToggleLabel')} />
             <button
               className="icon-btn lang-btn"
               onClick={() => setUiLocale((prev) => (prev === 'zh' ? 'en' : 'zh'))}
-              aria-label={uiLocale === 'zh' ? 'Switch to English' : '切換為中文'}
+              aria-label={uiLocale === 'zh' ? t(uiLocale, 'switchToEn') : t(uiLocale, 'switchToZh')}
             >
               {uiLocale === 'zh' ? 'EN' : '中'}
             </button>
             <button
+              ref={helpBtnRef}
               className="icon-btn"
               onClick={() => setShowHelp(true)}
               aria-label={t(uiLocale, 'helpBtn')}
               title={t(uiLocale, 'helpBtn')}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" />
                 <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
                 <line x1="12" y1="17" x2="12.01" y2="17" />
@@ -331,7 +464,7 @@ function App(): React.JSX.Element {
         </div>
 
         {/* Step indicator */}
-        <div className="stepper" role="navigation" aria-label="Workflow steps">
+        <div className="stepper" role="navigation" aria-label={t(uiLocale, 'stepperAriaLabel')}>
           {steps.map((s, i) => {
             const state = i < stepIndex ? 'completed' : i === stepIndex ? 'active' : 'pending'
             const lineState =
@@ -360,6 +493,9 @@ function App(): React.JSX.Element {
             <h2 className="section-title" style={{ marginBottom: 20 }}>
               {t(uiLocale, 'selectMode')}
             </h2>
+            <p className="section-guide" style={{ marginBottom: 18 }}>
+              {inputGuideText}
+            </p>
             <div
               style={{
                 display: 'grid',
@@ -437,6 +573,9 @@ function App(): React.JSX.Element {
                 {t(uiLocale, 'abort')}
               </button>
             </div>
+            <p className="section-guide" style={{ marginBottom: 12 }}>
+              {t(uiLocale, 'runningGuide')}
+            </p>
 
             {progress && progress.total > 0 && (
               <div className="progress-bar-container">
@@ -449,6 +588,7 @@ function App(): React.JSX.Element {
                 <div
                   className="progress-track"
                   role="progressbar"
+                  aria-label={t(uiLocale, 'crawling')}
                   aria-valuenow={progressPct}
                   aria-valuemin={0}
                   aria-valuemax={100}
@@ -459,7 +599,7 @@ function App(): React.JSX.Element {
               </div>
             )}
 
-            <div className="log-area" style={{ marginTop: 16 }}>
+            <div className="log-area" role="log" aria-label={t(uiLocale, 'logAreaLabel')} style={{ marginTop: 16 }}>
               {logs.map((log, i) => (
                 <div key={i}>{log}</div>
               ))}
@@ -480,7 +620,11 @@ function App(): React.JSX.Element {
             <div className="flex-between" style={{ marginBottom: 16 }}>
               <div>
                 <h2 className="section-title">{t(uiLocale, 'urlListTitle')}</h2>
-                <span className="url-count">{t(uiLocale, 'urlCount', { count: urls.length })}</span>
+                <span className="url-count">
+                  {mode === 'crawl' && allCrawledUrls.length > 0
+                    ? t(uiLocale, 'urlCountSeo', { seo: crawledSeoUrls.length, total: allCrawledUrls.length })
+                    : t(uiLocale, 'urlCount', { count: urls.length })}
+                </span>
               </div>
               <div className="download-btns">
                 {mode === 'crawl' && allCrawledUrls.length > 0 && (
@@ -501,6 +645,21 @@ function App(): React.JSX.Element {
                 )}
               </div>
             </div>
+            <p className="section-guide" style={{ marginBottom: 12 }}>
+              {t(uiLocale, 'urlListGuide')}
+            </p>
+
+            {notice && (
+              <div className="notice-alert" role="status" style={{ marginBottom: 12 }}>
+                {notice}
+              </div>
+            )}
+
+            {error && (
+              <div className="error-alert" role="alert" style={{ marginBottom: 12 }}>
+                {error}
+              </div>
+            )}
 
             {mode === 'crawl' && crawledSeoUrls.length < allCrawledUrls.length && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
@@ -525,13 +684,13 @@ function App(): React.JSX.Element {
               <table className="url-table">
                 <thead>
                   <tr>
-                    <th style={{ width: 60 }}>#</th>
-                    <th>URL</th>
+                    <th style={{ width: 60 }} scope="col">#</th>
+                    <th scope="col">URL</th>
                   </tr>
                 </thead>
                 <tbody>
                   {urls.map((u, i) => (
-                    <tr key={i}>
+                    <tr key={u}>
                       <td style={{ color: 'var(--text-tertiary)' }}>{i + 1}</td>
                       <td className="url-cell">{u}</td>
                     </tr>
@@ -563,6 +722,9 @@ function App(): React.JSX.Element {
             <h2 className="section-title" style={{ marginBottom: 20 }}>
               {t(uiLocale, 'settingsTitle')}
             </h2>
+            <p className="section-guide" style={{ marginBottom: 18 }}>
+              {t(uiLocale, 'settingsGuide')}
+            </p>
 
             <div style={{ marginBottom: 24 }}>
               <label className="label">{t(uiLocale, 'reportLanguage')}</label>
@@ -635,6 +797,9 @@ function App(): React.JSX.Element {
                 </button>
               )}
             </div>
+            <p className="section-guide" style={{ marginBottom: 12 }}>
+              {t(uiLocale, 'runningGuide')}
+            </p>
 
             {progress && progress.total > 0 && (
               <div className="progress-bar-container">
@@ -647,6 +812,7 @@ function App(): React.JSX.Element {
                 <div
                   className="progress-track"
                   role="progressbar"
+                  aria-label={progress?.type === 'crawl' ? t(uiLocale, 'crawling') : t(uiLocale, 'analyzing')}
                   aria-valuenow={progressPct}
                   aria-valuemin={0}
                   aria-valuemax={100}
@@ -654,11 +820,11 @@ function App(): React.JSX.Element {
                   <div className="progress-fill" style={{ width: `${progressPct}%` }} />
                 </div>
                 {progress.currentUrl && <div className="progress-url">{progress.currentUrl}</div>}
-                {getEta() && <div className="eta-display">{getEta()}</div>}
+                {(() => { const eta = getEta(); return eta ? <div className="eta-display">{eta}</div> : null })()}
               </div>
             )}
 
-            <div className="log-area" style={{ marginTop: 16 }}>
+            <div className="log-area" role="log" aria-label={t(uiLocale, 'logAreaLabel')} style={{ marginTop: 16 }}>
               {logs.map((log, i) => (
                 <div key={i}>{log}</div>
               ))}
@@ -677,10 +843,20 @@ function App(): React.JSX.Element {
         {step === 'done' && analysisComplete && (
           <div className="animate-fadeInUp" style={{ maxWidth: 800, margin: '0 auto' }}>
             <div className="success-card" style={{ marginBottom: 24 }}>
-              <div className="success-icon">🎉</div>
-              <h2 className="success-title">{t(uiLocale, 'analysisComplete')}</h2>
+              <div className="success-icon" aria-hidden="true">✓</div>
+              <h2 className="success-title">
+                {analysisWasPartial ? t(uiLocale, 'analysisPartial') : t(uiLocale, 'analysisComplete')}
+              </h2>
               <p className="success-desc">
-                {t(uiLocale, 'pagesAnalyzed', { count: urls.length })}
+                {analysisWasPartial
+                  ? t(uiLocale, 'pagesAnalyzedPartial', {
+                      done: completedAnalysisCount,
+                      total: urls.length
+                    })
+                  : t(uiLocale, 'pagesAnalyzed', { count: completedAnalysisCount || urls.length })}
+              </p>
+              <p className="success-desc" style={{ marginTop: 6 }}>
+                {analysisWasPartial ? t(uiLocale, 'doneGuidePartial') : t(uiLocale, 'doneGuide')}
               </p>
             </div>
 
@@ -704,7 +880,7 @@ function App(): React.JSX.Element {
                   ['📄', t(uiLocale, 'sheetPageData'), t(uiLocale, 'sheetPageDataDesc')],
                   ['📖', t(uiLocale, 'sheetGlossary'), t(uiLocale, 'sheetGlossaryDesc')]
                 ].map(([icon, name, desc]) => (
-                  <div key={name} className="sheet-item">
+                  <div key={icon} className="sheet-item">
                     <span className="sheet-icon">{icon}</span>
                     <div>
                       <div className="sheet-name">{name}</div>
@@ -723,6 +899,9 @@ function App(): React.JSX.Element {
             >
               {saving ? t(uiLocale, 'saving') : `💾 ${t(uiLocale, 'saveReport')}`}
             </button>
+            <p className="section-guide" style={{ marginTop: -6, marginBottom: 16 }}>
+              {t(uiLocale, 'saveHint')}
+            </p>
 
             {error && (
               <div className="error-alert" role="alert" style={{ marginBottom: 16 }}>
@@ -732,7 +911,7 @@ function App(): React.JSX.Element {
 
             <details>
               <summary>{t(uiLocale, 'viewLog')}</summary>
-              <div className="log-area" style={{ height: 240, borderRadius: 0, border: 'none' }}>
+              <div className="log-area" role="log" aria-label={t(uiLocale, 'logAreaLabel')} style={{ height: 240, borderRadius: 0, border: 'none' }}>
                 {logs.map((log, i) => (
                   <div key={i}>{log}</div>
                 ))}
@@ -744,11 +923,11 @@ function App(): React.JSX.Element {
 
       {/* Footer */}
       <footer className="app-footer">
-        Web Vitals Inspector — SEO Audit Tool powered by Lighthouse
+        {t(uiLocale, 'footerLine')}
       </footer>
 
       {/* Help modal */}
-      {showHelp && <HelpModal locale={uiLocale} onClose={() => setShowHelp(false)} />}
+      {showHelp && <HelpModal locale={uiLocale} onClose={handleCloseHelp} returnFocusRef={helpBtnRef} />}
     </div>
   )
 }
