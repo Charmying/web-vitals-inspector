@@ -1,12 +1,13 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
+import type { DownloadUrlsResult, ParseUrlsFileResult, SaveReportResult } from '../shared/ipc'
 
 /** SEO analysis API exposed to the renderer process */
 interface SeoAPI {
-  startCrawl: (rootUrl: string) => Promise<{ seoUrls: string[]; allUrls: string[] }>
-  parseUrlsFile: () => Promise<string[] | null>
+  startCrawl: (rootUrl: string, locale?: 'en' | 'zh') => Promise<{ seoUrls: string[]; allUrls: string[] }>
+  parseUrlsFile: () => Promise<ParseUrlsFileResult>
   startAnalysis: (urls: string[]) => Promise<unknown[]>
-  saveReport: (locale: string) => Promise<{ success: boolean; filePath?: string }>
-  downloadUrls: (type: 'seo' | 'all') => Promise<boolean>
+  saveReport: (locale: 'en' | 'zh') => Promise<SaveReportResult>
+  downloadUrls: (type: 'seo' | 'all') => Promise<DownloadUrlsResult>
   abort: () => Promise<boolean>
   onProgress: (callback: (data: Record<string, unknown>) => void) => () => void
 }
