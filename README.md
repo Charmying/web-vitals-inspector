@@ -14,7 +14,7 @@ We provide optimized stable builds for both Windows and macOS. Click a badge bel
 
 | Windows | macOS |
 | :---: | :---: |
-| [![Windows](https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge)](https://github.com/Charmying/web-vitals-inspector/releases/latest/download/web-vitals-inspector-windows.exe) | [![macOS](https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge)](https://github.com/Charmying/web-vitals-inspector/releases/latest/download/web-vitals-inspector-mac.dmg) |
+| [![Windows](https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge)](https://github.com/web-vitals-inspector/web-vitals-inspector/releases/latest/download/web-vitals-inspector-windows.exe) | [![macOS](https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge)](https://github.com/web-vitals-inspector/web-vitals-inspector/releases/latest/download/web-vitals-inspector-mac.dmg) |
 
 ### **💡 Installation Notes:**
 - **Windows:** If prompted by SmartScreen, click **"More info"** and select **"Run anyway"** to proceed.
@@ -48,7 +48,7 @@ We provide optimized stable builds for both Windows and macOS. Click a badge bel
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/web-vitals-inspector/web-vitals-inspector.git
 cd web-vitals-inspector
 
 # Install dependencies (also installs Electron binaries)
