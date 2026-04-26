@@ -1,9 +1,17 @@
 /** Theme toggle button with sun/moon SVG icons */
-export function ThemeToggle({ theme, onToggle }: { theme: 'light' | 'dark', onToggle: () => void }): React.JSX.Element {
+export function ThemeToggle({
+  theme,
+  onToggle,
+  label
+}: {
+  theme: 'light' | 'dark'
+  onToggle: () => void
+  label: string
+}): React.JSX.Element {
   return (
-    <button onClick={onToggle} className="icon-btn" aria-label="Toggle theme">
+    <button onClick={onToggle} className="icon-btn" aria-label={label} title={label}>
       {theme === 'dark' ? (
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="12" r="5" />
           <line x1="12" y1="1" x2="12" y2="3" />
           <line x1="12" y1="21" x2="12" y2="23" />
@@ -15,7 +23,7 @@ export function ThemeToggle({ theme, onToggle }: { theme: 'light' | 'dark', onTo
           <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
         </svg>
       ) : (
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
         </svg>
       )}
