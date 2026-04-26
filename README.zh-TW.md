@@ -14,7 +14,7 @@
 
 | Windows | macOS |
 | :---: | :---: |
-| [![Windows](https://img.shields.io/badge/下載-Windows-0078D4?style=for-the-badge)](https://github.com/Charmying/web-vitals-inspector/releases/latest/download/web-vitals-inspector-windows.exe) | [![macOS](https://img.shields.io/badge/下載-macOS-000000?style=for-the-badge)](https://github.com/Charmying/web-vitals-inspector/releases/latest/download/web-vitals-inspector-mac.dmg) |
+| [![Windows](https://img.shields.io/badge/下載-Windows-0078D4?style=for-the-badge)](https://github.com/web-vitals-inspector/web-vitals-inspector/releases/latest/download/web-vitals-inspector-windows.exe) | [![macOS](https://img.shields.io/badge/下載-macOS-000000?style=for-the-badge)](https://github.com/web-vitals-inspector/web-vitals-inspector/releases/latest/download/web-vitals-inspector-mac.dmg) |
 
 ### **💡 安裝提示：**
 - **Windows:** 若出現 SmartScreen 警告，請點擊 **「其他資訊」** 並選擇 **「仍要執行」**。
@@ -48,7 +48,7 @@
 
 ```bash
 # Clone 專案
-git clone <repository-url>
+git clone https://github.com/web-vitals-inspector/web-vitals-inspector.git
 cd web-vitals-inspector
 
 # 安裝依賴 (同時下載 Electron 執行檔)
