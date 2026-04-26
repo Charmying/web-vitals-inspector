@@ -5,7 +5,7 @@ import { getSheetNames, getUrlStatusHeaders, getPageDataHeaders, getIssuesHeader
 
 const PRIORITY_RANK: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 }
 const clean = (v: string | null | undefined): string => (v ?? '').replace(/\[.*?\]\(.*?\)/g, '').replace(/`/g, '').replace(/\n+/g, ' ').trim().slice(0, 250)
-const pct = (v: number | null | undefined): string | number => v != null ? Math.round(v * 100) : 'N/A'
+const pct = (v: number | null | undefined): number | null => v != null ? Math.round(v * 100) : null
 const av = (lhr: AnalysisResult['lhr'], key: string): string => {
   if (!lhr) return 'N/A'
   const audit = lhr.audits?.[key]
@@ -55,7 +55,7 @@ function autoWidth(ws: ExcelJS.Worksheet, headers: string[], maxWidth = 50, minW
 }
 
 /** Generate the complete Excel report with 6 sheets */
-export async function generateExcelReport(urlStatusData: UrlStatusEntry[] | null, analysisResults: AnalysisResult[], locale: Locale, reportDate: string, startTime: number): Promise<Buffer> {
+export async function generateExcelReport(urlStatusData: UrlStatusEntry[] | null, analysisResults: AnalysisResult[], locale: Locale, reportDate: string, analysisDurationMs: number): Promise<Buffer> {
   const wb = new ExcelJS.Workbook()
   wb.creator = 'Web Vitals Inspector'
   wb.created = new Date()
@@ -73,7 +73,12 @@ export async function generateExcelReport(urlStatusData: UrlStatusEntry[] | null
   ws1.addRow(h1)
   if (urlStatusData) {
     for (const entry of urlStatusData) {
-      ws1.addRow([entry.url, entry.status || 'ERR', entry.redirectTo ?? '', entry.label])
+      ws1.addRow([
+        entry.url,
+        entry.status ?? labels_noData(locale),
+        entry.redirectTo ?? '',
+        entry.label
+      ])
     }
   }
   styleHeaderRow(ws1, h1.length)
@@ -81,10 +86,10 @@ export async function generateExcelReport(urlStatusData: UrlStatusEntry[] | null
   ws1.getColumn(1).width = 60
 
   /** ========================= Sheet 2: Executive Summary ========================= */
-  generateExecSummarySheet(wb, sheetNames.executiveSummary, analysisResults, dupTitles, dupDescs, locale, reportDate, startTime)
+  generateExecSummarySheet(wb, sheetNames.executiveSummary, analysisResults, dupTitles, dupDescs, locale, reportDate, analysisDurationMs)
 
   /** ========================= Sheet 3: Top Issues ========================= */
-  generateTopIssuesSheet(wb, sheetNames.topIssues, analysisResults, locale, solutionMap, businessMap)
+  generateTopIssuesSheet(wb, sheetNames.topIssues, analysisResults, locale, solutionMap, businessMap, dupTitles, dupDescs)
 
   /** ========================= Sheet 4: Issue Details ========================= */
   generateIssuesSheet(wb, sheetNames.issues, analysisResults, dupTitles, dupDescs, locale, labels, solutionMap, businessMap)
@@ -121,11 +126,22 @@ function generatePageDataSheet( wb: ExcelJS.Workbook, sheetName: string, results
     const a11y = pct(cats.accessibility?.score)
     const bp = pct(cats['best-practices']?.score)
     const seo = pct(cats.seo?.score)
+    const hasMeta = meta !== null
+    const hasLighthouse = lhr !== null
     const m = meta ?? ({} as Record<string, unknown>)
     const t = tech ?? ({} as Record<string, unknown>)
+    const lighthouseStatus = hasLighthouse ? labels_lighthouseSuccess(locale) : labels_lighthouseFailed(locale)
+    const metadataStatus = hasMeta ? labels_analyzed(locale) : labels_unavailable(locale)
+    const metaText = <T extends string | null | undefined>(value: T): string =>
+      hasMeta ? (value ?? '') : labels_noData(locale)
+    const metaCount = (value: number | null | undefined): number | string =>
+      hasMeta ? (value ?? '') : labels_noData(locale)
+    const metaFlag = (ok: boolean): string =>
+      hasMeta ? (ok ? '✅' : '❌') : labels_noData(locale)
 
     ws.addRow([
       url, reportDate,
+      lighthouseStatus,
       perf, a11y, bp, seo,
       getGrade(perf, locale), getGrade(seo, locale),
       av(lhr, 'largest-contentful-paint'),
@@ -136,26 +152,35 @@ function generatePageDataSheet( wb: ExcelJS.Workbook, sheetName: string, results
       (t as { isHttps?: boolean }).isHttps ? '✅' : '❌',
       (t as { robotsTxtOk?: boolean }).robotsTxtOk ? '✅' : '❌',
       (t as { sitemapOk?: boolean }).sitemapOk ? '✅' : '❌',
-      (m as { canonical?: string | null }).canonical ?? labels_noData(locale),
-      (m as { robots?: string }).robots || labels_noData(locale),
-      (m as { title?: string }).title ?? '',
-      ((m as { title?: string }).title ?? '').length || '',
-      (m as { description?: string | null }).description ?? '',
-      ((m as { description?: string | null }).description ?? '').length || '',
-      (m as { h1Count?: number }).h1Count ?? '',
-      ((m as { h1Text?: string[] }).h1Text ?? []).slice(0, 2).join(' | '),
-      (m as { h2Count?: number }).h2Count ?? '',
-      (m as { imgTotal?: number }).imgTotal ?? '',
-      (m as { imgNoAlt?: number }).imgNoAlt ?? '',
-      (m as { viewport?: string | null }).viewport ? '✅' : '❌',
-      (m as { lang?: string }).lang || labels_noData(locale),
-      ((m as { hreflangLinks?: string[] }).hreflangLinks ?? []).join(', ') || labels_none(locale),
-      ((m as { schemas?: string[] }).schemas ?? []).join(', ') || labels_none(locale),
-      (m as { internalLinkCount?: number }).internalLinkCount ?? '',
-      (m as { wordCount?: number }).wordCount ?? '',
-      (m as { hasOgTitle?: boolean }).hasOgTitle ? '✅' : '❌',
-      (m as { hasOgDesc?: boolean }).hasOgDesc ? '✅' : '❌',
-      (m as { hasOgImage?: boolean }).hasOgImage ? '✅' : '❌'
+      metadataStatus,
+      metaText((m as { canonical?: string | null }).canonical) || labels_noData(locale),
+      metaText((m as { robots?: string }).robots) || labels_noData(locale),
+      metaText((m as { title?: string }).title),
+      hasMeta ? (((m as { title?: string }).title ?? '').length || '') : labels_noData(locale),
+      metaText((m as { description?: string | null }).description),
+      hasMeta
+        ? (((m as { description?: string | null }).description ?? '').length || '')
+        : labels_noData(locale),
+      metaCount((m as { h1Count?: number }).h1Count),
+      hasMeta
+        ? (((m as { h1Text?: string[] }).h1Text ?? []).slice(0, 2).join(' | ') || labels_none(locale))
+        : labels_noData(locale),
+      metaCount((m as { h2Count?: number }).h2Count),
+      metaCount((m as { imgTotal?: number }).imgTotal),
+      metaCount((m as { imgNoAlt?: number }).imgNoAlt),
+      metaFlag(!!(m as { viewport?: string | null }).viewport),
+      metaText((m as { lang?: string }).lang) || labels_noData(locale),
+      hasMeta
+        ? (((m as { hreflangLinks?: string[] }).hreflangLinks ?? []).join(', ') || labels_none(locale))
+        : labels_noData(locale),
+      hasMeta
+        ? (((m as { schemas?: string[] }).schemas ?? []).join(', ') || labels_none(locale))
+        : labels_noData(locale),
+      metaCount((m as { internalLinkCount?: number }).internalLinkCount),
+      metaCount((m as { wordCount?: number }).wordCount),
+      metaText((m as { ogTitle?: string | null }).ogTitle) || labels_noData(locale),
+      metaText((m as { ogDesc?: string | null }).ogDesc) || labels_noData(locale),
+      metaText((m as { ogImage?: string | null }).ogImage) || labels_noData(locale)
     ])
   }
 
@@ -167,6 +192,23 @@ function generatePageDataSheet( wb: ExcelJS.Workbook, sheetName: string, results
 function labels_noData(locale: Locale): string {
   return locale === 'zh' ? '（無）' : '(N/A)'
 }
+
+function labels_lighthouseSuccess(locale: Locale): string {
+  return locale === 'zh' ? '已完成' : 'Completed'
+}
+
+function labels_lighthouseFailed(locale: Locale): string {
+  return locale === 'zh' ? '失敗' : 'Failed'
+}
+
+function labels_analyzed(locale: Locale): string {
+  return locale === 'zh' ? '已擷取' : 'Extracted'
+}
+
+function labels_unavailable(locale: Locale): string {
+  return locale === 'zh' ? '無法擷取' : 'Unavailable'
+}
+
 function labels_none(locale: Locale): string {
   return locale === 'zh' ? '無' : 'None'
 }
@@ -221,14 +263,8 @@ function generateIssuesSheet(wb: ExcelJS.Workbook, sheetName: string, results: A
 
     // Tech-level rules are always safe to report — they rely on HTTP HEAD
     // checks, not on reading the page HTML.
-    const techP0: [boolean, string, string, string][] = [
-      [!t.isHttps, 'missing-https', locale === 'zh' ? '網站使用 HTTP 而非 HTTPS' : 'Site uses HTTP instead of HTTPS', locale === 'zh' ? 'Google 明確降權 HTTP 網站' : 'Google explicitly downgrades HTTP sites']
-    ]
-    for (const [cond, id, title, desc] of techP0) {
-      if (!cond) continue
-      push(url, labels.customRule, labels.p0Indexing, id, title, desc, labels.missing, '', '', 'P0', 'Critical')
-    }
     const techP1: [boolean, string, string, string][] = [
+      [!t.isHttps, 'missing-https', locale === 'zh' ? '網站使用 HTTP 而非 HTTPS' : 'Site uses HTTP instead of HTTPS', locale === 'zh' ? 'Google 會降低 HTTP 網站信任與排名訊號' : 'Google lowers trust and ranking signals for HTTP sites'],
       [!t.robotsTxtOk, 'robots-txt-missing', locale === 'zh' ? '缺少 /robots.txt' : 'Missing /robots.txt', locale === 'zh' ? '爬蟲行為無法控制' : 'Crawler behavior uncontrolled'],
       [!t.sitemapOk, 'sitemap-missing', locale === 'zh' ? '缺少 /sitemap.xml' : 'Missing /sitemap.xml', locale === 'zh' ? '新頁面被發現速度慢' : 'New pages discovered slowly']
     ]
@@ -321,7 +357,7 @@ function generateIssuesSheet(wb: ExcelJS.Workbook, sheetName: string, results: A
 }
 
 /** Sheet 3: Top 20 most frequent issues ranked by priority */
-function generateTopIssuesSheet(wb: ExcelJS.Workbook, sheetName: string, results: AnalysisResult[], locale: Locale, solutionMap: Record<string, string>, businessMap: Record<string, string>): void {
+function generateTopIssuesSheet(wb: ExcelJS.Workbook, sheetName: string, results: AnalysisResult[], locale: Locale, solutionMap: Record<string, string>, businessMap: Record<string, string>, dupTitles: Record<string, string[]>, dupDescs: Record<string, string[]>): void {
   const ws = wb.addWorksheet(sheetName)
   const total = results.length
   const headers = getTopIssuesHeaders(locale, total)
@@ -348,7 +384,8 @@ function generateTopIssuesSheet(wb: ExcelJS.Workbook, sheetName: string, results
       for (const [id, audit] of Object.entries(lhr.audits)) {
         if (['notApplicable', 'manual', 'informative'].includes(audit.scoreDisplayMode)) continue
         if (audit.score === 1 || audit.score == null) continue
-        const p = audit.score === 0 ? 'P1' : audit.score < 0.5 ? 'P2' : 'P3'
+        const isCritLH = ['crawlable-anchors', 'meta-description', 'document-title', 'hreflang', 'robots-txt', 'canonical'].includes(id)
+        const p = (isCritLH || audit.score === 0) ? 'P1' : audit.score < 0.5 ? 'P2' : 'P3'
         add(url, id, audit.title, labels.lighthouse, p)
       }
     }
@@ -357,9 +394,9 @@ function generateTopIssuesSheet(wb: ExcelJS.Workbook, sheetName: string, results
     // basis to claim any on-page rule is violated and counting false positives
     // would silently distort the Top Issues ranking.
     const hasMeta = meta !== null
-    const metaObj = m as { canonical?: string | null; robots?: string; title?: string; viewport?: string | null; description?: string | null; h1Count?: number; imgNoAlt?: number; wordCount?: number; schemas?: string[]; hasOgImage?: boolean; internalLinkCount?: number }
+    const metaObj = m as { canonical?: string | null; robots?: string; title?: string; viewport?: string | null; description?: string | null; h1Count?: number; h2Count?: number; imgNoAlt?: number; wordCount?: number; schemas?: string[]; hasOgImage?: boolean; hasOgTitle?: boolean; hasOgDesc?: boolean; lang?: string; hreflangLinks?: string[]; internalLinkCount?: number }
     const techRules: [boolean, string, string, string][] = [
-      [!t.isHttps, 'missing-https', locale === 'zh' ? '缺少 HTTPS' : 'Missing HTTPS', 'P0'],
+      [!t.isHttps, 'missing-https', locale === 'zh' ? '缺少 HTTPS' : 'Missing HTTPS', 'P1'],
       [!t.robotsTxtOk, 'robots-txt-missing', locale === 'zh' ? '缺少 robots.txt' : 'Missing robots.txt', 'P1'],
       [!t.sitemapOk, 'sitemap-missing', locale === 'zh' ? '缺少 sitemap.xml' : 'Missing sitemap.xml', 'P1']
     ]
@@ -374,16 +411,34 @@ function generateTopIssuesSheet(wb: ExcelJS.Workbook, sheetName: string, results
       [!metaObj.title, 'missing-title', locale === 'zh' ? '缺少 Title' : 'Missing Title', 'P0'],
       [!metaObj.viewport, 'missing-viewport', locale === 'zh' ? '缺少 Viewport' : 'Missing Viewport', 'P1'],
       [!metaObj.description, 'missing-description', locale === 'zh' ? '缺少 Description' : 'Missing Description', 'P2'],
+      [!!metaObj.title && metaObj.title.length < 10, 'title-too-short', locale === 'zh' ? 'Title 過短' : 'Title too short', 'P2'],
+      [(metaObj.title?.length ?? 0) > 60, 'title-too-long', locale === 'zh' ? 'Title 過長' : 'Title too long', 'P2'],
+      [!!metaObj.description && metaObj.description.length < 50, 'desc-too-short', locale === 'zh' ? 'Description 過短' : 'Description too short', 'P2'],
+      [(metaObj.description?.length ?? 0) > 160, 'desc-too-long', locale === 'zh' ? 'Description 過長' : 'Description too long', 'P2'],
       [(metaObj.h1Count ?? 0) === 0, 'missing-h1', locale === 'zh' ? '缺少 H1' : 'Missing H1', 'P2'],
       [(metaObj.h1Count ?? 0) > 1, 'multiple-h1', locale === 'zh' ? 'H1 過多' : 'Too many H1', 'P2'],
+      [(metaObj.h2Count ?? 0) === 0, 'missing-h2', locale === 'zh' ? '缺少 H2 標題' : 'Missing H2 headings', 'P2'],
       [(metaObj.imgNoAlt ?? 0) > 0, 'img-missing-alt', locale === 'zh' ? '圖片缺 alt' : 'Images missing alt', 'P2'],
       [(metaObj.wordCount ?? 999) < 300, 'thin-content', locale === 'zh' ? '內容過薄' : 'Thin content', 'P2'],
       [(metaObj.schemas ?? []).length === 0, 'missing-schema', locale === 'zh' ? '無 Schema' : 'No Schema', 'P3'],
       [!metaObj.hasOgImage, 'missing-og-image', locale === 'zh' ? '缺少 og:image' : 'Missing og:image', 'P3'],
+      [!metaObj.hasOgTitle, 'missing-og-title', locale === 'zh' ? '缺少 og:title' : 'Missing og:title', 'P3'],
+      [!metaObj.hasOgDesc, 'missing-og-description', locale === 'zh' ? '缺少 og:description' : 'Missing og:description', 'P3'],
+      [!metaObj.lang, 'missing-lang', locale === 'zh' ? '缺少 HTML lang' : 'Missing HTML lang', 'P3'],
+      [(metaObj.hreflangLinks ?? []).length === 0, 'missing-hreflang', locale === 'zh' ? '無 hreflang' : 'No hreflang', 'P3'],
       [metaObj.internalLinkCount === 0, 'no-internal-links', locale === 'zh' ? '無內部連結' : 'No internal links', 'P3']
     ]
     for (const [cond, id, title, priority] of metaRules) {
       if (cond) add(url, id, title, labels.customRule, priority)
+    }
+    // Cross-page duplicate detection
+    const titleVal = (metaObj.title ?? '').trim()
+    if (titleVal && dupTitles[titleVal]?.length > 1) {
+      add(url, 'duplicate-title', locale === 'zh' ? '重複 Title' : 'Duplicate Title', labels.customRule, 'P2')
+    }
+    const descVal = (metaObj.description ?? '').trim()
+    if (descVal && dupDescs[descVal]?.length > 1) {
+      add(url, 'duplicate-description', locale === 'zh' ? '重複 Description' : 'Duplicate Description', labels.customRule, 'P2')
     }
   }
 
@@ -415,7 +470,7 @@ function generateTopIssuesSheet(wb: ExcelJS.Workbook, sheetName: string, results
 }
 
 /** Sheet 2: Executive summary with key metrics and one-line conclusion */
-function generateExecSummarySheet(wb: ExcelJS.Workbook, sheetName: string, results: AnalysisResult[], dupTitles: Record<string, string[]>, dupDescs: Record<string, string[]>, locale: Locale, reportDate: string, startTime: number): void {
+function generateExecSummarySheet(wb: ExcelJS.Workbook, sheetName: string, results: AnalysisResult[], dupTitles: Record<string, string[]>, dupDescs: Record<string, string[]>, locale: Locale, reportDate: string, analysisDurationMs: number): void {
   const ws = wb.addWorksheet(sheetName)
   const headers = getExecSummaryHeaders(locale)
   ws.addRow(headers)
@@ -424,23 +479,29 @@ function generateExecSummarySheet(wb: ExcelJS.Workbook, sheetName: string, resul
   const total = results.length
   if (total === 0) { styleHeaderRow(ws, headers.length); return }
 
-  const avgScore = (cat: string): number => {
+  const avgScore = (cat: string): number | null => {
     const valid = results.filter((r) => r.lhr?.categories?.[cat]?.score != null)
-    if (!valid.length) return 0
+    if (!valid.length) return null
     return Math.round((valid.reduce((a, r) => a + (r.lhr!.categories[cat].score ?? 0), 0) / valid.length) * 100)
   }
 
   const avgPerf = avgScore('performance')
   const avgSEO = avgScore('seo')
+  const lighthouseSuccessCount = results.filter((r) => r.lhr !== null).length
+  const lighthouseFailureCount = total - lighthouseSuccessCount
   const metaValid = results.filter((r) => r.meta !== null)
   const mv = metaValid.length
+  const metaUnavailableCount = total - mv
   const cnt = (pred: (r: AnalysisResult) => boolean): number => metaValid.filter(pred).length
-  const pct2 = (n: number, base = total): string => `${n} / ${base}（${base > 0 ? Math.round((n / base) * 100) : 0}%）`
+  const pct2 = (n: number, base = total): string =>
+    locale === 'zh'
+      ? `${n} / ${base}（${base > 0 ? Math.round((n / base) * 100) : 0}%）`
+      : `${n} / ${base} (${base > 0 ? Math.round((n / base) * 100) : 0}%)`
   const noHttps = results.filter((r) => !r.tech?.isHttps).length
   const noCanon = cnt((r) => !r.meta?.canonical)
   const hasNoIdx = cnt((r) => !!r.meta?.robots?.includes('noindex'))
   const noTitle = cnt((r) => !r.meta?.title)
-  const p0Total = noHttps + noCanon + hasNoIdx + noTitle
+  const p0Total = noCanon + hasNoIdx + noTitle
   const redPerf = results.filter((r) => (r.lhr?.categories?.performance?.score ?? 1) < 0.5).length
   const noRobots = results.filter((r) => !r.tech?.robotsTxtOk).length
   const noSitemap = results.filter((r) => !r.tech?.sitemapOk).length
@@ -459,54 +520,87 @@ function generateExecSummarySheet(wb: ExcelJS.Workbook, sheetName: string, resul
       if (a.score !== 1 && a.score != null && !['notApplicable', 'manual', 'informative'].includes(a.scoreDisplayMode)) freq[a.title] = (freq[a.title] || 0) + 1
     })
   })
-  const top5 = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([t, c]) => `${t}（${c}${locale === 'zh' ? '頁' : ' pages'}）`).join('；')
+  const top5 = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([t, c]) => locale === 'zh' ? `${t}（${c}頁）` : `${t} (${c} pages)`).join(locale === 'zh' ? '；' : '; ')
   const withPerf = results.filter((r) => r.lhr?.categories?.performance?.score != null)
+  const withSeo = results.filter((r) => r.lhr?.categories?.seo?.score != null)
   const best = withPerf.length ? withPerf.reduce((a, b) => (a.lhr!.categories.performance.score ?? 0) > (b.lhr!.categories.performance.score ?? 0) ? a : b).url : '-'
   const worst = withPerf.length ? withPerf.reduce((a, b) => (a.lhr!.categories.performance.score ?? 1) < (b.lhr!.categories.performance.score ?? 1) ? a : b).url : '-'
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
+  const elapsed = (Math.max(analysisDurationMs, 0) / 1000).toFixed(1)
   const gradeIcon = (s: number): string => s >= 90 ? '🟢' : s >= 50 ? '🟡' : '🔴'
+  const scoreCell = (s: number | null): string | number => s ?? labels_noData(locale)
+  const scoreStatus = (s: number | null): string => s == null ? '⚪' : gradeIcon(s)
+  const coverageStatus = (success: number, base = total): string =>
+    success === base ? '🟢' : success === 0 ? '🔴' : '🟡'
   const light = (bad: boolean): string => bad ? '🔴' : '🟢'
   const warn = (bad: boolean): string => bad ? '🟡' : '🟢'
+  const lighthouseCoverageNote = (success: number): string =>
+    success === total
+      ? L.avgBasedOnAll
+      : locale === 'zh'
+        ? `平均分數僅基於 ${success} / ${total} 個 Lighthouse 成功頁面`
+        : `Averages are based on ${success} of ${total} successful Lighthouse runs`
+  const lighthouseSuccessNote = (): string =>
+    lighthouseSuccessCount === total
+      ? L.avgBasedOnAll
+      : locale === 'zh'
+        ? '只有成功頁面會進入平均分數與 Lighthouse 排行'
+        : 'Only successful pages contribute to averages and Lighthouse rankings'
 
   // Conclusion
-  const conclusion = locale === 'zh'
-    ? (p0Total > 0
-        ? `🔴 發現 ${p0Total} 個 P0 緊急問題（Indexing 層），直接阻擋 Google 索引，需立即修復。`
-        : avgPerf < 50
-          ? `🔴 整體效能偏弱（平均 ${avgPerf}），LCP 與 JS 阻塞嚴重，建議優先優化前端載入策略。`
-          : avgPerf < 75
-            ? `🟡 整體效能中等（平均 ${avgPerf}），建議處理 LCP、未使用 JS 及缺失的 Schema。`
-            : `🟢 整體效能良好（平均 ${avgPerf}），維持現有水準，持續監控 CLS 與 INP。`)
-    : (p0Total > 0
-        ? `🔴 Found ${p0Total} P0 critical issues (Indexing layer) directly blocking Google indexing. Fix immediately.`
-        : avgPerf < 50
-          ? `🔴 Overall performance is weak (avg ${avgPerf}). LCP and JS blocking are severe. Prioritize frontend optimization.`
-          : avgPerf < 75
-            ? `🟡 Overall performance is moderate (avg ${avgPerf}). Address LCP, unused JS, and missing Schema.`
-            : `🟢 Overall performance is good (avg ${avgPerf}). Maintain current level, monitor CLS and INP.`)
+  const coverageWarning = lighthouseFailureCount > 0
+    ? locale === 'zh'
+      ? `另有 ${lighthouseFailureCount} 頁 Lighthouse 執行失敗，平均分數僅供成功頁面參考。`
+      : `${lighthouseFailureCount} ${lighthouseFailureCount === 1 ? 'page' : 'pages'} failed Lighthouse, so averages cover successful pages only.`
+    : ''
+  const conclusion = lighthouseSuccessCount === 0
+    ? (locale === 'zh'
+        ? '🔴 Lighthouse 在所有頁面都執行失敗，請先排查執行環境、Chrome 可用性或站台可存取性，再解讀報表。'
+        : '🔴 Lighthouse failed on every page. Fix the execution environment, Chrome availability, or site accessibility before interpreting the report.')
+    : locale === 'zh'
+      ? (p0Total > 0
+          ? `🔴 發現 ${p0Total} 個 P0 緊急問題（Indexing 層），直接阻擋 Google 索引，需立即修復。${coverageWarning ? ` ${coverageWarning}` : ''}`
+          : avgPerf != null && avgPerf < 50
+            ? `🔴 整體效能偏弱（平均 ${avgPerf}），LCP 與 JS 阻塞嚴重，建議優先優化前端載入策略。${coverageWarning ? ` ${coverageWarning}` : ''}`
+            : avgPerf != null && avgPerf < 75
+              ? `🟡 整體效能中等（平均 ${avgPerf}），建議處理 LCP、未使用 JS 及缺失的 Schema。${coverageWarning ? ` ${coverageWarning}` : ''}`
+              : `🟢 整體效能良好（平均 ${avgPerf}），維持現有水準，持續監控 CLS 與 INP。${coverageWarning ? ` ${coverageWarning}` : ''}`)
+      : (p0Total > 0
+          ? `🔴 Found ${p0Total} P0 critical issues (Indexing layer) directly blocking Google indexing. Fix immediately.${coverageWarning ? ` ${coverageWarning}` : ''}`
+          : avgPerf != null && avgPerf < 50
+            ? `🔴 Overall performance is weak (avg ${avgPerf}). LCP and JS blocking are severe. Prioritize frontend optimization.${coverageWarning ? ` ${coverageWarning}` : ''}`
+            : avgPerf != null && avgPerf < 75
+              ? `🟡 Overall performance is moderate (avg ${avgPerf}). Address LCP, unused JS, and missing Schema.${coverageWarning ? ` ${coverageWarning}` : ''}`
+              : `🟢 Overall performance is good (avg ${avgPerf}). Maintain current level, monitor CLS and INP.${coverageWarning ? ` ${coverageWarning}` : ''}`)
 
-  const resourceEstimate = locale === 'zh'
-    ? (p0Total > 5 ? '預估需 1-2 位工程師 × 2 週完成 P0+P1 修復'
-        : p0Total > 0 ? '預估需 1 位工程師 × 1 週完成 P0+P1 修復'
-          : redPerf > 3 ? '預估需 1 位工程師 × 2 週完成效能優化'
-            : '預估需 1 位工程師 × 3-5 天完成優化')
-    : (p0Total > 5 ? 'Estimated: 1-2 engineers × 2 weeks to fix P0+P1'
-        : p0Total > 0 ? 'Estimated: 1 engineer × 1 week to fix P0+P1'
-          : redPerf > 3 ? 'Estimated: 1 engineer × 2 weeks for performance optimization'
-            : 'Estimated: 1 engineer × 3-5 days to optimize')
+  const resourceEstimate = lighthouseSuccessCount === 0
+    ? (locale === 'zh'
+        ? '先修復 Lighthouse 執行環境與站台可存取性，再估算 SEO / 效能優化工時'
+        : 'Fix the Lighthouse execution environment and site accessibility before estimating SEO or performance work')
+    : locale === 'zh'
+      ? (p0Total > 5 ? '預估需 1-2 位工程師 × 2 週完成 P0+P1 修復'
+          : p0Total > 0 ? '預估需 1 位工程師 × 1 週完成 P0+P1 修復'
+            : redPerf > 3 ? '預估需 1 位工程師 × 2 週完成效能優化'
+              : '預估需 1 位工程師 × 3-5 天完成優化')
+      : (p0Total > 5 ? 'Estimated: 1-2 engineers × 2 weeks to fix P0+P1'
+          : p0Total > 0 ? 'Estimated: 1 engineer × 1 week to fix P0+P1'
+            : redPerf > 3 ? 'Estimated: 1 engineer × 2 weeks for performance optimization'
+              : 'Estimated: 1 engineer × 3-5 days to optimize')
 
   const rows: (string | number)[][] = [
     [L.basic, L.reportDate, reportDate, '', ''],
     [L.basic, L.totalPages, total, '', ''],
     [L.basic, L.elapsed, elapsed, '', ''],
+    [L.basic, L.lhSuccess, pct2(lighthouseSuccessCount), coverageStatus(lighthouseSuccessCount), lighthouseSuccessNote()],
+    [L.basic, L.lhFailed, pct2(lighthouseFailureCount), warn(lighthouseFailureCount > 0), L.reviewFailures],
+    [L.basic, L.metaUnavailable, pct2(metaUnavailableCount), warn(metaUnavailableCount > 0), L.onPageCoverage],
     [L.p0Section, L.p0Total, p0Total, light(p0Total > 0), L.p0Highest],
-    [L.p0Section, L.noHttps, pct2(noHttps), light(noHttps > 0), L.googleDemote],
     [L.p0Section, L.noCanon, pct2(noCanon, mv), light(noCanon > 0), L.dupRisk],
     [L.p0Section, L.noindex, pct2(hasNoIdx, mv), light(hasNoIdx > 0), L.intentional],
     [L.p0Section, L.noTitle, pct2(noTitle, mv), light(noTitle > 0), L.rankImpact],
-    [L.p1Section, L.perfAvg, `${avgPerf}`, gradeIcon(avgPerf), L.cwv],
-    [L.p1Section, L.seoAvg, `${avgSEO}`, gradeIcon(avgSEO), L.lhSeo],
+    [L.p1Section, L.perfAvg, scoreCell(avgPerf), scoreStatus(avgPerf), lighthouseCoverageNote(withPerf.length)],
+    [L.p1Section, L.seoAvg, scoreCell(avgSEO), scoreStatus(avgSEO), lighthouseCoverageNote(withSeo.length)],
     [L.p1Section, L.perfRed, pct2(redPerf), light(redPerf > 0), L.needOpt],
+    [L.p1Section, L.noHttps, pct2(noHttps), warn(noHttps > 0), L.googleDemote],
     [L.p1Section, L.noRobots, pct2(noRobots), warn(noRobots > 0), ''],
     [L.p1Section, L.noSitemap, pct2(noSitemap), warn(noSitemap > 0), ''],
     [L.p1Section, L.top5, top5, '', L.fullSiteIssues],

@@ -46,6 +46,12 @@ type ExecLabels = {
   reportDate: string
   totalPages: string
   elapsed: string
+  lhSuccess: string
+  lhFailed: string
+  metaUnavailable: string
+  avgBasedOnAll: string
+  reviewFailures: string
+  onPageCoverage: string
   p0Section: string
   p0Total: string
   p0Highest: string
@@ -120,10 +126,11 @@ export function getPageDataHeaders(locale: Locale): string[] {
   return locale === 'zh'
     ? [
         '網址', '報告日期',
+      'Lighthouse狀態',
         'Performance', 'Accessibility', 'Best Practices', 'SEO',
         'Performance等級', 'SEO等級',
         'LCP', 'CLS', 'TBT (INP proxy)', 'FCP', 'Speed Index',
-        'HTTPS', 'robots.txt', 'Sitemap', 'Canonical', 'Robots Meta',
+        'HTTPS', 'robots.txt', 'Sitemap', '元資料狀態', 'Canonical', 'Robots Meta',
         'Title', 'Title字元數', 'Description', 'Description字元數',
         'H1數量', 'H1內容', 'H2數量',
         '圖片總數', '圖片缺Alt',
@@ -133,10 +140,11 @@ export function getPageDataHeaders(locale: Locale): string[] {
       ]
     : [
         'URL', 'Report Date',
+      'Lighthouse Status',
         'Performance', 'Accessibility', 'Best Practices', 'SEO',
         'Performance Grade', 'SEO Grade',
         'LCP', 'CLS', 'TBT (INP proxy)', 'FCP', 'Speed Index',
-        'HTTPS', 'robots.txt', 'Sitemap', 'Canonical', 'Robots Meta',
+        'HTTPS', 'robots.txt', 'Sitemap', 'Metadata Status', 'Canonical', 'Robots Meta',
         'Title', 'Title Length', 'Description', 'Description Length',
         'H1 Count', 'H1 Content', 'H2 Count',
         'Image Total', 'Images Missing Alt',
@@ -441,6 +449,12 @@ export function getExecLabels(locale: Locale): ExecLabels {
     reportDate: zh ? '報告日期' : 'Report Date',
     totalPages: zh ? '分析頁面數' : 'Pages Analyzed',
     elapsed: zh ? '耗時（秒）' : 'Elapsed (sec)',
+    lhSuccess: zh ? 'Lighthouse 成功頁數' : 'Lighthouse Success Pages',
+    lhFailed: zh ? 'Lighthouse 失敗頁數' : 'Lighthouse Failed Pages',
+    metaUnavailable: zh ? '元資料擷取失敗頁數' : 'Metadata Unavailable Pages',
+    avgBasedOnAll: zh ? '所有頁面都有可用的 Lighthouse 結果' : 'All pages have usable Lighthouse results',
+    reviewFailures: zh ? '先檢查失敗頁面與執行環境' : 'Review failed pages and execution environment first',
+    onPageCoverage: zh ? 'On-page 規則只會套用到成功擷取元資料的頁面' : 'On-page rules only apply where metadata extraction succeeded',
     p0Section: zh ? '🚨 P0 索引層' : '🚨 P0 Indexing',
     p0Total: zh ? '⚠ P0 問題總數' : '⚠ P0 Total Issues',
     p0Highest: zh ? '最高優先——影響能否被收錄' : 'Highest priority — affects whether pages can be indexed',
@@ -501,6 +515,8 @@ export function getGlossaryData(locale: Locale): string[][] {
       ['📄 報告檔案', '問題明細', '給工程師看的完整問題清單。每一頁的每一個問題都列出來，包含具體的修復方式和預估影響。'],
       ['📄 報告檔案', '每頁數據', '每一頁的原始數據總覽。Lighthouse 分數、技術 SEO 狀態、On-page 資訊全部列在一起，方便交叉比對。'],
       ['📄 報告檔案', '術語解釋', '解釋報告中所有欄位和術語的意思。'],
+      ['📄 報告檔案', 'Lighthouse狀態', '標示該頁面 Lighthouse 是否成功執行。若為「失敗」，分數欄位不應拿來做排序或平均判讀。'],
+      ['📄 報告檔案', '元資料狀態', '標示該頁面 HTML 元資料是否成功擷取。若為「無法擷取」，On-page 規則不會套用，以避免誤判。'],
       ['⚡ Core Web Vitals', 'LCP（Largest Contentful Paint）', '「最大內容繪製時間」。從使用者打開網頁到看到主要內容（大圖片或大標題）需要幾秒。Google 標準：≤ 2.5 秒合格，> 4 秒不合格。'],
       ['⚡ Core Web Vitals', 'CLS（Cumulative Layout Shift）', '「累計版面偏移」。網頁載入時內容是否會亂跳。Google 標準：≤ 0.1 合格，> 0.25 不合格。'],
       ['⚡ Core Web Vitals', 'TBT（Total Blocking Time）', '「總阻塞時間」。頁面載入過程中，JavaScript 卡住畫面多久。TBT 越長，使用者點東西越沒反應。TBT 是 INP 的實驗室替代指標。'],
@@ -538,6 +554,8 @@ export function getGlossaryData(locale: Locale): string[][] {
     ['📄 Report Sheets', 'Issue Details', 'Complete issue list for engineers. Every issue on every page with specific fix steps and estimated impact.'],
     ['📄 Report Sheets', 'Page Data', 'Raw per-page data overview. Lighthouse scores, technical SEO status, and on-page info side by side.'],
     ['📄 Report Sheets', 'Glossary', 'Explains all fields and terms used in this report.'],
+    ['📄 Report Sheets', 'Lighthouse Status', 'Shows whether Lighthouse completed successfully for the page. If it failed, score columns should not be interpreted as sortable numeric results.'],
+    ['📄 Report Sheets', 'Metadata Status', 'Shows whether HTML metadata extraction succeeded. If unavailable, on-page rules are intentionally skipped to avoid false positives.'],
     ['⚡ Core Web Vitals', 'LCP (Largest Contentful Paint)', 'Time until the largest content element (hero image or headline) is visible. Google standard: ≤ 2.5s good, > 4s poor.'],
     ['⚡ Core Web Vitals', 'CLS (Cumulative Layout Shift)', 'How much the page layout shifts during loading. Google standard: ≤ 0.1 good, > 0.25 poor.'],
     ['⚡ Core Web Vitals', 'TBT (Total Blocking Time)', 'How long JavaScript blocks the main thread during loading. TBT is the lab proxy for INP.'],
