@@ -1,4 +1,3 @@
-import { ElectronAPI } from '@electron-toolkit/preload'
 import type { DownloadUrlsResult, ParseUrlsFileResult, SaveReportResult } from '../shared/ipc'
 
 /** SEO analysis API exposed to the renderer process */
@@ -14,7 +13,6 @@ interface SeoAPI {
 
 declare global {
   interface Window {
-    electron: ElectronAPI
     api: SeoAPI
   }
 }

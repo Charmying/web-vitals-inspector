@@ -1,5 +1,4 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
 import type { DownloadUrlsResult, ParseUrlsFileResult, SaveReportResult } from '../shared/ipc'
 
 /** API bridge between main process and renderer */
@@ -19,18 +18,11 @@ const api = {
 
 if (process.contextIsolated) {
   try {
-    contextBridge.exposeInMainWorld('electron', electronAPI)
-  } catch (error) {
-    console.error('[preload] Failed to expose electron API:', error)
-  }
-  try {
     contextBridge.exposeInMainWorld('api', api)
   } catch (error) {
     console.error('[preload] Failed to expose SEO API:', error)
   }
 } else {
-  // @ts-ignore (define in dts)
-  window.electron = electronAPI
   // @ts-ignore (define in dts)
   window.api = api
 }
