@@ -4,6 +4,7 @@ import fs from 'fs'
 import { crawlUrls } from './seo/crawler'
 import { analyzeUrls } from './seo/analyzer'
 import { generateExcelReport } from './seo/report-generator'
+import { checkUrlStatuses } from './seo/url-checker'
 import type { Locale, UrlStatusEntry, AnalysisResult } from './seo/types'
 import { isHttpUrl, type DownloadUrlsResult, type ParseUrlsFileResult, type SaveReportResult } from '../shared/ipc'
 
@@ -154,16 +155,58 @@ export function registerIpcHandlers(): void {
         throw new Error('No valid URLs to analyze.')
       }
 
+      // CRITICAL: Create job and signal BEFORE any async operations
+      const { jobId, signal } = beginJob()
+      
       const crawlAllUrlSet = new Set(lastCrawlAllUrls)
       const isFromCurrentCrawl =
         crawlAllUrlSet.size > 0 && cleanUrls.every((u) => crawlAllUrlSet.has(u))
+      
+      // If URLs are not from a crawl (e.g., uploaded file or single URL),
+      // check their HTTP status and redirects before analysis
       if (!isFromCurrentCrawl) {
-        lastCrawlUrlStatus = null
         lastCrawlSeoUrls = cleanUrls
         lastCrawlAllUrls = cleanUrls
+        
+        console.log(`[ipc] Starting URL status check for ${cleanUrls.length} URLs...`)
+        
+        // Check URL statuses with progress reporting
+        try {
+          const statusResults = await checkUrlStatuses(
+            cleanUrls,
+            (current, total, url) => {
+              if (jobId !== activeJobId || signal.aborted) return
+              event.sender.send('seo:progress', {
+                type: 'url-check',
+                phase: 'checking',
+                current,
+                total,
+                currentUrl: url
+              })
+            },
+            signal
+          )
+          
+          if (jobId !== activeJobId || signal.aborted) {
+            throw new Error('URL check aborted or superseded by a newer job.')
+          }
+          
+          console.log(`[ipc] URL status check completed. Results: ${statusResults.length} entries`)
+          if (statusResults.length > 0) {
+            console.log(`[ipc] Sample result:`, statusResults[0])
+          }
+          
+          lastCrawlUrlStatus = statusResults.length > 0 ? statusResults : null
+        } catch (err) {
+          if (jobId !== activeJobId || signal.aborted) {
+            throw new Error('URL check aborted or superseded by a newer job.')
+          }
+          console.error('[ipc] URL status check failed:', (err as Error).message)
+          console.error('[ipc] Error stack:', (err as Error).stack)
+          lastCrawlUrlStatus = null
+        }
       }
 
-      const { jobId, signal } = beginJob()
       analysisStartTime = Date.now()
       analysisDurationMs = 0
       lastAnalysisResults = []
@@ -224,17 +267,29 @@ export function registerIpcHandlers(): void {
 
       try {
         const reportDate = localeDateTime()
-        const urlStatus =
-          lastCrawlUrlStatus ??
-          lastAnalysisResults.map((r) => ({
-            url: r.url,
-            status: null,
-            redirectTo: null,
-            label:
-              locale === 'zh'
-                ? 'ℹ 僅分析，未執行爬取'
-                : 'ℹ Analysis only, not crawled'
-          }))
+        
+        console.log(`[ipc] Generating report. lastCrawlUrlStatus:`, lastCrawlUrlStatus ? `${lastCrawlUrlStatus.length} entries` : 'null')
+        console.log(`[ipc] lastAnalysisResults: ${lastAnalysisResults.length} entries`)
+        
+        // Build URL status data that matches ONLY the analyzed URLs
+        const analyzedUrlSet = new Set(lastAnalysisResults.map((r) => r.url))
+        const urlStatus = lastCrawlUrlStatus
+          ? lastCrawlUrlStatus.filter((entry) => analyzedUrlSet.has(entry.url))
+          : lastAnalysisResults.map((r) => ({
+              url: r.url,
+              status: null,
+              redirectTo: null,
+              label:
+                locale === 'zh'
+                  ? 'ℹ 僅分析，未執行爬取'
+                  : 'ℹ Analysis only, not crawled'
+            }))
+        
+        console.log(`[ipc] Final urlStatus for report: ${urlStatus.length} entries`)
+        if (urlStatus.length > 0) {
+          console.log(`[ipc] Sample urlStatus:`, urlStatus[0])
+        }
+        
         const buffer = await generateExcelReport(
           urlStatus,
           lastAnalysisResults,

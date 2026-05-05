@@ -13,7 +13,7 @@ type ReportLocale = 'en' | 'zh'
 const MAX_LOG_LINES = 500
 
 interface ProgressData {
-  type: 'crawl' | 'analysis'
+  type: 'crawl' | 'analysis' | 'url-check'
   phase?: string
   current: number
   total: number
@@ -83,6 +83,8 @@ function App(): React.JSX.Element {
       setProgress(p)
       if (p.type === 'crawl' && p.message) {
         addLog(p.message)
+      } else if (p.type === 'url-check' && p.currentUrl) {
+        addLog(`[${p.current}/${p.total}] Checking: ${p.currentUrl}`)
       } else if (p.type === 'analysis' && p.currentUrl) {
         if (p.perfScore !== undefined || p.seoScore !== undefined) {
           setCompletedAnalysisCount((prev) => {
@@ -220,6 +222,18 @@ function App(): React.JSX.Element {
       setError(t(uiLocale, 'errorApiBridge'))
       return
     }
+    
+    // For crawl mode, use urlFilter to determine which URLs to analyze
+    // For upload/single mode, use urls directly
+    const urlsToAnalyze = mode === 'crawl'
+      ? (urlFilter === 'seo' ? crawledSeoUrls : allCrawledUrls)
+      : urls
+    
+    if (urlsToAnalyze.length === 0) {
+      setError(t(uiLocale, 'errorNoValidUrls'))
+      return
+    }
+    
     setError(null)
     setNotice(null)
     setIsRunning(true)
@@ -233,16 +247,16 @@ function App(): React.JSX.Element {
     const workflowToken = ++workflowTokenRef.current
     setProgress(null)
     analysisStartRef.current = Date.now()
-    addLog(t(uiLocale, 'analysisStart', { count: urls.length }))
+    addLog(t(uiLocale, 'analysisStart', { count: urlsToAnalyze.length }))
     addLog(`${t(uiLocale, 'reportLangLog')} ${reportLocale === 'zh' ? '中文' : 'English'}`)
 
     try {
-      await window.api.startAnalysis(urls)
+      await window.api.startAnalysis(urlsToAnalyze)
       if (workflowToken !== workflowTokenRef.current) return
       setIsRunning(false)
       setAnalysisWasPartial(false)
-      setCompletedAnalysisCount(urls.length)
-      completedAnalysisCountRef.current = urls.length
+      setCompletedAnalysisCount(urlsToAnalyze.length)
+      completedAnalysisCountRef.current = urlsToAnalyze.length
       if (!isResettingRef.current) {
         setAnalysisComplete(true)
         setStep('done')
@@ -259,7 +273,7 @@ function App(): React.JSX.Element {
         const doneCount = completedAnalysisCountRef.current
         setAnalysisWasPartial(true)
         if (doneCount > 0) {
-          addLog(t(uiLocale, 'analysisPartialLog', { done: doneCount, total: urls.length }))
+          addLog(t(uiLocale, 'analysisPartialLog', { done: doneCount, total: urlsToAnalyze.length }))
         }
         setAnalysisComplete(true)
         setStep('done')
@@ -748,7 +762,11 @@ function App(): React.JSX.Element {
               </h3>
               <div className="summary-row">
                 <span className="summary-label">{t(uiLocale, 'pagesCount')}</span>
-                <span className="summary-value">{urls.length}</span>
+                <span className="summary-value">
+                  {mode === 'crawl'
+                    ? (urlFilter === 'seo' ? crawledSeoUrls.length : allCrawledUrls.length)
+                    : urls.length}
+                </span>
               </div>
               <div className="summary-row">
                 <span className="summary-label">{t(uiLocale, 'reportLang')}</span>
@@ -777,7 +795,11 @@ function App(): React.JSX.Element {
           <div className="animate-fadeInUp" style={{ maxWidth: 800, margin: '0 auto' }}>
             <div className="flex-between" style={{ marginBottom: 16 }}>
               <h2 className="section-title">
-                {progress?.type === 'crawl' ? t(uiLocale, 'crawling') : t(uiLocale, 'analyzing')}
+                {progress?.type === 'crawl' 
+                  ? t(uiLocale, 'crawling') 
+                  : progress?.type === 'url-check'
+                    ? (uiLocale === 'zh' ? '檢查 URL 狀態' : 'Checking URL Status')
+                    : t(uiLocale, 'analyzing')}
               </h2>
               {isRunning && (
                 <button onClick={handleAbort} className="btn btn-danger btn-sm">
@@ -786,7 +808,11 @@ function App(): React.JSX.Element {
               )}
             </div>
             <p className="section-guide" style={{ marginBottom: 12 }}>
-              {t(uiLocale, 'runningGuide')}
+              {progress?.type === 'url-check'
+                ? (uiLocale === 'zh' 
+                    ? '正在檢查 URL 的 HTTP 狀態碼和重定向…' 
+                    : 'Checking HTTP status codes and redirects for URLs...')
+                : t(uiLocale, 'runningGuide')}
             </p>
 
             {progress && progress.total > 0 && (
@@ -800,7 +826,13 @@ function App(): React.JSX.Element {
                 <div
                   className="progress-track"
                   role="progressbar"
-                  aria-label={progress?.type === 'crawl' ? t(uiLocale, 'crawling') : t(uiLocale, 'analyzing')}
+                  aria-label={
+                    progress?.type === 'crawl' 
+                      ? t(uiLocale, 'crawling') 
+                      : progress?.type === 'url-check'
+                        ? (uiLocale === 'zh' ? '檢查 URL' : 'Checking URLs')
+                        : t(uiLocale, 'analyzing')
+                  }
                   aria-valuenow={progressPct}
                   aria-valuemin={0}
                   aria-valuemax={100}
