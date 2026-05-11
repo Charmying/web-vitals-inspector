@@ -10,6 +10,8 @@ import { isHttpUrl, type DownloadUrlsResult, type ParseUrlsFileResult, type Save
 
 const MAX_URL_FILE_BYTES = 5 * 1024 * 1024
 const MAX_URL_COUNT = 10000
+const DEFAULT_ANALYSIS_CHUNK_SIZE = 200
+const LARGE_ANALYSIS_THRESHOLD = 1000
 
 /** Shared state across IPC calls — reset at the start of each long-running job */
 let lastCrawlUrlStatus: UrlStatusEntry[] | null = null
@@ -65,6 +67,18 @@ function sanitizeUrls(inputs: string[]): string[] {
   }
 
   return urls
+}
+
+function getAnalysisChunkSize(totalUrls: number): number {
+  const raw = process.env.SEO_ANALYSIS_CHUNK_SIZE
+  const parsed = Number(raw)
+  if (Number.isInteger(parsed) && parsed > 0) {
+    return Math.min(parsed, totalUrls)
+  }
+  if (totalUrls >= LARGE_ANALYSIS_THRESHOLD) {
+    return Math.min(DEFAULT_ANALYSIS_CHUNK_SIZE, totalUrls)
+  }
+  return totalUrls
 }
 
 function beginJob(): { jobId: number; signal: { aborted: boolean } } {
@@ -210,30 +224,74 @@ export function registerIpcHandlers(): void {
       analysisStartTime = Date.now()
       analysisDurationMs = 0
       lastAnalysisResults = []
-      // `onPartial` lets the analyzer hand us completed rows as they arrive —
-      // if the user aborts mid-run we keep whatever finished, so a partial
-      // report is still available.
+      const totalUrls = cleanUrls.length
+      const chunkSize = getAnalysisChunkSize(totalUrls)
+      const chunkCount = Math.ceil(totalUrls / chunkSize)
+      const aggregated: AnalysisResult[] = []
+
+      console.log(
+        `[ipc] Starting analysis: ${totalUrls} URLs in ${chunkCount} chunk(s), chunk size=${chunkSize}`
+      )
+
+      // `onPartial` lets the analyzer hand us completed rows as they arrive.
+      // We merge completed chunks + current chunk so abort still preserves
+      // maximum progress for partial reporting.
       try {
-        const results = await analyzeUrls(
-          cleanUrls,
-          (progress) => {
-            if (jobId !== activeJobId || signal.aborted) return
-            event.sender.send('seo:progress', { type: 'analysis', ...progress })
-          },
-          signal,
-          (partial) => {
-            if (jobId !== activeJobId || signal.aborted) return
-            lastAnalysisResults = partial
+        for (let offset = 0; offset < totalUrls; offset += chunkSize) {
+          if (jobId !== activeJobId || signal.aborted) {
+            throw new Error('Analysis aborted or superseded by a newer job.')
           }
-        )
-        if (jobId !== activeJobId || signal.aborted) {
-          throw new Error('Analysis aborted or superseded by a newer job.')
+
+          const chunkIndex = Math.floor(offset / chunkSize)
+          const chunkUrls = cleanUrls.slice(offset, offset + chunkSize)
+
+          const chunkResults = await analyzeUrls(
+            chunkUrls,
+            (progress) => {
+              if (jobId !== activeJobId || signal.aborted) return
+              event.sender.send('seo:progress', {
+                type: 'analysis',
+                current: offset + progress.current,
+                total: totalUrls,
+                currentUrl: progress.currentUrl,
+                perfScore: progress.perfScore,
+                seoScore: progress.seoScore
+              })
+            },
+            signal,
+            (partial) => {
+              if (jobId !== activeJobId || signal.aborted) return
+              lastAnalysisResults = [...aggregated, ...partial]
+            }
+          )
+
+          if (jobId !== activeJobId || signal.aborted) {
+            throw new Error('Analysis aborted or superseded by a newer job.')
+          }
+
+          aggregated.push(...chunkResults)
+          lastAnalysisResults = aggregated.slice()
+
+          console.log(
+            `[ipc] Analysis chunk ${chunkIndex + 1}/${chunkCount} done: ` +
+              `${chunkResults.length} results, total accumulated=${aggregated.length}`
+          )
+
+          if (typeof globalThis.gc === 'function') {
+            globalThis.gc()
+            console.log(`[ipc] GC triggered after chunk ${chunkIndex + 1}/${chunkCount}`)
+          }
         }
-        lastAnalysisResults = results
-        return results
+
+        return aggregated
       } finally {
         if (jobId === activeJobId && analysisStartTime > 0) {
           analysisDurationMs = Math.max(Date.now() - analysisStartTime, 0)
+        }
+        // Force GC after analysis completes
+        if (typeof globalThis.gc === 'function') {
+          globalThis.gc()
+          console.log('[ipc] GC triggered after analysis completion')
         }
       }
     }

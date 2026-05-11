@@ -1,0 +1,271 @@
+##############################################################################
+# Release workflow
+#
+# Triggered by pushing a semver tag (e.g. v1.2.3).
+# Builds the Electron app on Windows and macOS (x64 + arm64), then creates
+# a GitHub Release and uploads all installer artefacts automatically.
+#
+# Build matrix
+# ─────────────────────────────────────────────────────────────────────────────
+#  Platform   Runner            Output artefact
+#  Windows    windows-latest    web-vitals-inspector-<ver>-setup.exe
+#  macOS x64  macos-13          web-vitals-inspector-<ver>-x64.dmg
+#  macOS arm64 macos-latest     web-vitals-inspector-<ver>-arm64.dmg
+# ─────────────────────────────────────────────────────────────────────────────
+##############################################################################
+
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version string for this release (for example: 1.2.3 or v1.2.3)'
+        required: true
+        type: string
+
+permissions:
+  contents: write   # required to create releases and upload assets
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # Windows build
+  # ────────────────────────────────────────────────────────────────────────────
+  build-windows:
+    name: Build (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # Restore the Puppeteer Chrome cache — keyed on the rc file so a
+      # new Puppeteer version automatically invalidates the cache.
+      - name: Restore Puppeteer Chrome cache
+        uses: actions/cache@v4
+        id: puppeteer-cache-win
+        with:
+          path: .puppeteer-cache
+          key: puppeteer-chrome-win-${{ hashFiles('.puppeteerrc.cjs') }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            puppeteer-chrome-win-${{ hashFiles('.puppeteerrc.cjs') }}-
+
+      - name: Install dependencies (and download Chrome if cache miss)
+        run: npm ci
+        env:
+          # Skip Puppeteer's browser download only when the cache was restored.
+          # npm ci still runs the postinstall hook; we need Chrome in .puppeteer-cache.
+          PUPPETEER_SKIP_DOWNLOAD: ${{ steps.puppeteer-cache-win.outputs.cache-hit == 'true' && 'true' || 'false' }}
+
+      # Explicit download when cache miss — ensures .puppeteer-cache exists
+      - name: Download Puppeteer Chrome (cache miss)
+        if: steps.puppeteer-cache-win.outputs.cache-hit != 'true'
+        run: npx puppeteer browsers install chrome
+
+      - name: Build Windows installer
+        run: npm run build:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            dist/*.exe
+            dist/*.exe.blockmap
+            dist/latest.yml
+          if-no-files-found: error
+          retention-days: 7
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # macOS x64 build
+  # ────────────────────────────────────────────────────────────────────────────
+  build-mac-x64:
+    name: Build (macOS x64)
+    runs-on: macos-13   # GitHub's Intel Mac runner
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Restore Puppeteer Chrome cache
+        uses: actions/cache@v4
+        id: puppeteer-cache-mac-x64
+        with:
+          path: .puppeteer-cache
+          key: puppeteer-chrome-mac-x64-${{ hashFiles('.puppeteerrc.cjs') }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            puppeteer-chrome-mac-x64-${{ hashFiles('.puppeteerrc.cjs') }}-
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: ${{ steps.puppeteer-cache-mac-x64.outputs.cache-hit == 'true' && 'true' || 'false' }}
+
+      - name: Download Puppeteer Chrome (cache miss)
+        if: steps.puppeteer-cache-mac-x64.outputs.cache-hit != 'true'
+        run: npx puppeteer browsers install chrome
+
+      - name: Build macOS x64 DMG
+        run: npm run build:mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload macOS x64 artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-x64-dmg
+          path: |
+            dist/*-x64.dmg
+            dist/*-x64.dmg.blockmap
+            dist/latest-mac.yml
+          if-no-files-found: error
+          retention-days: 7
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # macOS arm64 build (Apple Silicon)
+  # ────────────────────────────────────────────────────────────────────────────
+  build-mac-arm64:
+    name: Build (macOS arm64)
+    runs-on: macos-latest  # Apple Silicon runner
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Restore Puppeteer Chrome cache
+        uses: actions/cache@v4
+        id: puppeteer-cache-mac-arm64
+        with:
+          path: .puppeteer-cache
+          key: puppeteer-chrome-mac-arm64-${{ hashFiles('.puppeteerrc.cjs') }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            puppeteer-chrome-mac-arm64-${{ hashFiles('.puppeteerrc.cjs') }}-
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: ${{ steps.puppeteer-cache-mac-arm64.outputs.cache-hit == 'true' && 'true' || 'false' }}
+
+      - name: Download Puppeteer Chrome (cache miss)
+        if: steps.puppeteer-cache-mac-arm64.outputs.cache-hit != 'true'
+        run: npx puppeteer browsers install chrome
+
+      - name: Build macOS arm64 DMG
+        run: npm run build:mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload macOS arm64 artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-dmg
+          path: |
+            dist/*-arm64.dmg
+            dist/*-arm64.dmg.blockmap
+          if-no-files-found: error
+          retention-days: 7
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # GitHub Release
+  # Creates a release with all artefacts once all builds succeed.
+  # ────────────────────────────────────────────────────────────────────────────
+  create-release:
+    name: Create GitHub Release
+    needs: [build-windows, build-mac-x64, build-mac-arm64]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artefacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: false
+
+      # Flatten the artefact subdirectories into a single release-files/ folder
+      - name: Flatten artefact directories
+        run: |
+          mkdir -p release-files
+          find release-assets -type f \
+            \( -name "*.exe" -o -name "*.dmg" -o -name "*.blockmap" -o -name "*.yml" \) \
+            -exec cp {} release-files/ \;
+          ls -lh release-files/
+
+      # Extract version from the git tag (strips leading 'v')
+      - name: Resolve release tag and version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RAW='${{ github.event.inputs.version }}'
+            TAG_NAME="${RAW#v}"
+            TAG_NAME="v${TAG_NAME}"
+          else
+            TAG_NAME="${GITHUB_REF_NAME}"
+          fi
+
+          VERSION="${TAG_NAME#v}"
+          echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      # Build a concise release body from the tag annotation (if any)
+      - name: Generate release notes
+        id: notes
+        run: |
+          # Try to get tag annotation message first
+          TAG_MSG=$(git tag -l --format='%(contents)' "${{ steps.version.outputs.tag_name }}" 2>/dev/null || echo "")
+          if [ -z "$TAG_MSG" ]; then
+            TAG_MSG="Release ${{ steps.version.outputs.tag_name }}"
+          fi
+          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$TAG_MSG" >> "$GITHUB_OUTPUT"
+          echo "" >> "$GITHUB_OUTPUT"
+          echo "## Downloads" >> "$GITHUB_OUTPUT"
+          echo "" >> "$GITHUB_OUTPUT"
+          echo "| Platform | File |" >> "$GITHUB_OUTPUT"
+          echo "|----------|------|" >> "$GITHUB_OUTPUT"
+          echo "| Windows  | \`web-vitals-inspector-${{ steps.version.outputs.version }}-setup.exe\` |" >> "$GITHUB_OUTPUT"
+          echo "| macOS (Apple Silicon) | \`web-vitals-inspector-${{ steps.version.outputs.version }}-arm64.dmg\` |" >> "$GITHUB_OUTPUT"
+          echo "| macOS (Intel) | \`web-vitals-inspector-${{ steps.version.outputs.version }}-x64.dmg\` |" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag_name }}
+          target_commitish: ${{ github.sha }}
+          name: Web Vitals Inspector v${{ steps.version.outputs.version }}
+          body: ${{ steps.notes.outputs.notes }}
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.tag_name, '-') }}
+          files: release-files/*
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -2,15 +2,17 @@ appId: com.webvitalsinspector.app
 productName: Web Vitals Inspector
 directories:
   buildResources: build
-# Run build/afterSign.js after the app is assembled to apply free ad-hoc
-# code signing. This prevents the "damaged app" error on Apple Silicon Macs
-# and makes the "Open Anyway" bypass appear in Privacy & Security.
+# Ensure the Puppeteer Chrome cache exists before packaging starts.
+# If .puppeteer-cache is missing the hook downloads Chrome automatically.
+beforeBuild: build/before-build.js
+# Apply free ad-hoc code signing on macOS after the app is assembled.
+# This prevents the "damaged app" error on Apple Silicon Macs and surfaces
+# the "Open Anyway" bypass in System Settings → Privacy & Security.
 afterSign: build/afterSign.js
-# Disable asar so that node_modules/.bin/lighthouse.cmd can be spawned as a
-# real subprocess and Lighthouse can require() its own modules at runtime.
+# Disable asar so that Lighthouse can require() its own modules at runtime.
 asar: false
-# Bundle the project-local Chromium download (.puppeteer-cache/) into the app.
-# After cloning, run `npm install` once so Puppeteer downloads Chrome there.
+# Bundle the Puppeteer Chrome download into the packaged app so it runs on
+# machines that have never executed `npm install`.
 extraResources:
   - from: .puppeteer-cache
     to: puppeteer-cache

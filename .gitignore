@@ -6,3 +6,7 @@ out
 *.log*
 # Puppeteer-managed Chromium download (bundled into packaged app via extraResources)
 .puppeteer-cache/
+# Stress-test generated artifacts
+scripts/stress/generated-urls.txt
+reports/stress/*.json
+reports/stress/*.md

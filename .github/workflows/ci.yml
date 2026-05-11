@@ -1,0 +1,62 @@
+##############################################################################
+# CI workflow — runs on every PR and push to main/develop.
+# Validates TypeScript types and ensures the Vite/Electron build succeeds.
+# Does NOT run electron-builder (too slow for CI) — that is release.yml's job.
+##############################################################################
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop, 'feature/**', 'fix/**']
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  typecheck-and-build:
+    name: Type-check & Vite build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # Skip Chrome download on CI — we only need TypeScript + Vite to succeed
+      - name: Install dependencies (skip Puppeteer Chrome download)
+        run: npm ci
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+
+      - name: TypeScript type-check
+        run: npm run typecheck
+
+      - name: Vite build (no packaging)
+        run: npx electron-vite build
+
+  lint:
+    name: ESLint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies (skip Puppeteer Chrome download)
+        run: npm ci
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+
+      - name: ESLint
+        run: npm run lint

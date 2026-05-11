@@ -4,7 +4,12 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { registerIpcHandlers } from './ipc-handlers'
+import { runStressTestFromCli } from './seo/stress-test'
 import { isHttpUrl } from '../shared/ipc'
+
+if (!process.env.NODE_OPTIONS?.includes('--max-old-space-size')) {
+  app.commandLine.appendSwitch('js-flags', '--max-old-space-size=16384 --expose-gc')
+}
 
 /** Create the main application window */
 function createWindow(): void {
@@ -55,6 +60,22 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  const isStressMode = process.argv.includes('--stress-test')
+  if (isStressMode) {
+    runStressTestFromCli(process.argv)
+      .then((exitCode) => {
+        process.exitCode = exitCode
+      })
+      .catch((err) => {
+        console.error('[stress] Fatal error:', (err as Error).message)
+        process.exitCode = 1
+      })
+      .finally(() => {
+        app.quit()
+      })
+    return
+  }
+
   electronApp.setAppUserModelId('com.webvitalsinspector.app')
 
   app.on('browser-window-created', (_, window) => {

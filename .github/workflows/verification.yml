@@ -1,0 +1,124 @@
+name: Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      stress_url_count:
+        description: 'Number of URLs for Windows stress test (>=300)'
+        required: false
+        default: '320'
+
+permissions:
+  contents: read
+
+jobs:
+  macos-build-and-installability:
+    name: macOS Build + DMG Verify
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build macOS package
+        run: npm run build:mac
+
+      - name: Verify DMG mount and app signature
+        run: |
+          set -euo pipefail
+
+          DMG_PATH=$(ls dist/*-arm64.dmg dist/*-x64.dmg 2>/dev/null | head -n 1 || true)
+          if [ -z "$DMG_PATH" ]; then
+            echo "No DMG found in dist/."
+            exit 1
+          fi
+
+          echo "Using DMG: $DMG_PATH"
+          MOUNT_LINE=$(hdiutil attach "$DMG_PATH" -nobrowse -quiet | tail -n 1)
+          MOUNT_POINT=$(echo "$MOUNT_LINE" | awk '{print $NF}')
+
+          APP_PATH=$(find "$MOUNT_POINT" -maxdepth 2 -name "*.app" -print | head -n 1 || true)
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app found inside mounted DMG"
+            hdiutil detach "$MOUNT_POINT" -quiet || true
+            exit 1
+          fi
+
+          echo "Found app bundle: $APP_PATH"
+          codesign --verify --deep --strict "$APP_PATH"
+          spctl --assess --type execute "$APP_PATH" || true
+
+          hdiutil detach "$MOUNT_POINT" -quiet
+
+      - name: Upload macOS build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-verification-artifacts
+          path: |
+            dist/*.dmg
+            dist/*.dmg.blockmap
+            dist/latest-mac.yml
+          if-no-files-found: error
+
+  windows-300plus-stress:
+    name: Windows 300+ URL Stress Test
+    runs-on: windows-latest
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate stress_url_count input
+        shell: pwsh
+        run: |
+          $count = [int]"${{ inputs.stress_url_count }}"
+          if ($count -lt 300) {
+            Write-Error "stress_url_count must be >= 300; got $count"
+            exit 1
+          }
+          Write-Host "✓ stress_url_count validation passed: $count"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate stress URLs
+        run: npm run stress:prepare-urls -- --count=${{ inputs.stress_url_count }}
+
+      - name: Start mock site and run analyzer stress test
+        shell: pwsh
+        run: |
+          $env:STRESS_MOCK_PAGES = "${{ inputs.stress_url_count }}"
+          $mock = Start-Process -FilePath node -ArgumentList "scripts/stress/mock-site.mjs" -PassThru -NoNewWindow
+          try {
+            Start-Sleep -Seconds 2
+            npm run stress:analyzer -- --urls-file=scripts/stress/generated-urls.txt --report-dir=reports/stress --label=ci-windows-${{ inputs.stress_url_count }} --chunk-size=200
+          }
+          finally {
+            if ($null -ne $mock -and -not $mock.HasExited) {
+              Stop-Process -Id $mock.Id -Force
+            }
+          }
+
+      - name: Upload stress report
+        uses: actions/upload-artifact@v4
+        with:
+          name: stress-report
+          path: reports/stress/*
+          if-no-files-found: error
