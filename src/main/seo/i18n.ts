@@ -174,8 +174,8 @@ export function getTopIssuesHeaders(locale: Locale, total: number): string[] {
   return locale === 'zh'
     ? [
         '排名', '優先度', '問題ID', '問題標題',
-        '受影響頁面數', `覆蓋率（共${total}頁）`,
-        '建議解法', '商業影響', '範例網址（前3）'
+        '受影響頁面數', `覆蓋率 (共${total}頁)`,
+        '建議解法', '商業影響', '範例網址 (前3)'
       ]
     : [
         'Rank', 'Priority', 'Issue ID', 'Issue Title',
@@ -189,14 +189,14 @@ export function getExecSummaryHeaders(locale: Locale): string[] {
 }
 
 export function getGlossaryHeaders(locale: Locale): string[] {
-  return locale === 'zh' ? ['分類', '欄位 / 術語', '白話解釋（1-3 句）'] : ['Category', 'Field / Term', 'Explanation']
+  return locale === 'zh' ? ['分類', '欄位 / 術語', '白話解釋 (1-3 句)'] : ['Category', 'Field / Term', 'Explanation']
 }
 
 /** UI labels used in issue sheets and status display */
 export function getLabels(locale: Locale): Labels {
   return locale === 'zh'
     ? {
-        noData: '（無）',
+        noData: ' (無)',
         none: '無',
         lhFailed: 'Lighthouse 執行失敗',
         lhFailedDesc: '請確認 Chrome 已安裝，或網頁是否需要登入',
@@ -270,7 +270,7 @@ export function getSolutionMap(locale: Locale): Record<string, string> {
       'largest-contentful-paint': '① 壓縮主視覺並轉 WebP/AVIF ② 加 fetchpriority="high" ③ 啟用 CDN ④ 預連線 preconnect',
       'first-contentful-paint': '① 最佳化關鍵渲染路徑 ② 內聯關鍵 CSS ③ font-display: swap',
       'cumulative-layout-shift': '① 所有圖片/影片設 width+height ② 避免動態插入 above-the-fold 內容 ③ font-display: optional',
-      'total-blocking-time': '① 拆分 JS Bundle（code splitting）② 移除未使用 JS ③ 長任務拆分至 < 50ms ④ 考慮 Web Worker',
+      'total-blocking-time': '① 拆分 JS Bundle (code splitting) ② 移除未使用 JS ③ 長任務拆分至 < 50ms ④ 考慮 Web Worker',
       'interaction-to-next-paint': '① 減少事件處理器執行時間 ② 使用 scheduler.yield() ③ 避免同步 DOM 強制重排',
       'speed-index': '① 減少主執行緒阻塞 ② 延遲非關鍵資源 ③ SSR 或預渲染',
       'mainthread-work-breakdown': '① code splitting ② 移除未使用 JS ③ 延遲非必要第三方腳本',
@@ -280,13 +280,13 @@ export function getSolutionMap(locale: Locale): Record<string, string> {
       'font-display-insight': '① 所有字型加 font-display: swap 或 optional',
       'uses-optimized-images': '① 轉 WebP/AVIF ② 壓縮品質 75-85% ③ 啟用 CDN 自動壓縮',
       'uses-responsive-images': '① 使用 srcset + sizes ② 依裝置提供不同尺寸',
-      'uses-text-compression': '① 啟用 Brotli（優先）或 Gzip 伺服器壓縮',
+      'uses-text-compression': '① 啟用 Brotli (優先) 或 Gzip 伺服器壓縮',
       'uses-long-cache-ttl': '① 靜態資源設 Cache-Control: max-age=31536000, immutable',
       'sitemap-missing': '建立 XML Sitemap 並提交至 Google Search Console',
       'missing-viewport': '加上 <meta name="viewport" content="width=device-width, initial-scale=1">',
       'missing-description': '補上 meta description，50-160 字元，包含主要關鍵字與行動呼籲',
       'title-too-short': '擴寫 Title 至 30-60 字元，加入核心關鍵字與品牌名',
-      'title-too-long': '縮短 Title 至 60 字元以內（Google 約截斷 580px）',
+      'title-too-long': '縮短 Title 至 60 字元以內 (Google 約截斷 580px)',
       'desc-too-short': '補充 description 至 50 字元以上，完整描述頁面價值',
       'desc-too-long': '縮短 description 至 160 字元以內，避免 SERP 被截斷',
       'missing-h1': '新增一個包含核心關鍵字的 H1 標題',
@@ -297,19 +297,19 @@ export function getSolutionMap(locale: Locale): Record<string, string> {
       'img-missing-alt': '為每張圖片補上描述性 alt 屬性',
       'missing-h2': '加入 H2 作為段落標題，強化內容結構與語義',
       'crawlable-anchors': '確認 <a> href 為實際 URL，移除 javascript: 或空 # 連結',
-      'meta-description': '補上或調整 meta description（50-160 字元）',
+      'meta-description': '補上或調整 meta description (50-160 字元)',
       'document-title': '確保每頁有唯一且有意義的 <title>',
       'tap-targets': '按鈕/連結最小 48x48px，間距至少 8px',
-      'color-contrast': '調整文字與背景對比度至 4.5:1（WCAG AA）以上',
+      'color-contrast': '調整文字與背景對比度至 4.5:1 (WCAG AA) 以上',
       'hreflang': '多語系頁面加上 hreflang + x-default',
       'robots-txt': '確認 /robots.txt 允許 Googlebot 爬取重要頁面',
-      'missing-lang': 'HTML 標籤加上 lang 屬性（如 lang="vi"）',
+      'missing-lang': 'HTML 標籤加上 lang 屬性 (例如 lang="vi")',
       'missing-hreflang': '多語系頁面加 <link rel="alternate" hreflang="xx" href="...">',
       'missing-schema': '加入 JSON-LD：Organization / BreadcrumbList / Product / FAQPage',
       'missing-og-image': '<meta property="og:image" content="https://...1200x630.jpg">',
       'missing-og-title': '<meta property="og:title" content="頁面標題">',
       'missing-og-description': '<meta property="og:description" content="頁面描述">',
-      'no-internal-links': '加入相關頁面的內部連結，建立主題群（Topic Cluster）'
+      'no-internal-links': '加入相關頁面的內部連結，建立主題群 (Topic Cluster)'
     }
   }
   return {
@@ -378,19 +378,19 @@ export function getBusinessMap(locale: Locale): Record<string, string> {
       'largest-contentful-paint': 'LCP 每增加 1 秒，轉換率下降約 7%，跳出率上升 20-30%',
       'first-contentful-paint': 'FCP 過慢使用者感覺網站卡頓，廣告投放 ROI 下降',
       'cumulative-layout-shift': 'CLS > 0.1 排名降權，版面跳動破壞信任感，誤觸廣告',
-      'total-blocking-time': 'TBT 是 INP 的 lab proxy，頁面卡頓造成使用者放棄（行動端最明顯）',
+      'total-blocking-time': 'TBT 是 INP 的 lab proxy，頁面卡頓造成使用者放棄 (動端最明顯)',
       'interaction-to-next-paint': 'INP > 200ms 為 Core Web Vitals 不合格，直接影響排名',
       'unused-javascript': '浪費頻寬、拖慢速度，增加使用者與伺服器流量成本',
       'render-blocking-insight': '阻塞首屏渲染，LCP 與 FCP 同步惡化',
       'sitemap-missing': '新頁面被 Google 發現速度降低，可能數週才被索引',
       'missing-viewport': '行動端版面異常，Google 行動優先索引嚴重受損',
-      'missing-description': 'SERP 點擊率（CTR）平均下降 5-10%',
+      'missing-description': 'SERP 點擊率 (CTR) 平均下降 5-10%',
       'document-title': '排名直接受損，Google 無法判斷頁面主題',
       'meta-description': 'SERP CTR 下降，影響廣告文案參考基準',
       'missing-h1': 'Google 無法判斷頁面主題，排名關鍵字範圍縮小',
       'multiple-h1': '主題訊號分散，降低頁面在目標關鍵字的排名能力',
       'thin-content': 'Google 視為低品質內容，可能觸發演算法降權',
-      'duplicate-title': 'Google 混淆頁面主題，造成關鍵字自相殘殺（cannibalization）',
+      'duplicate-title': 'Google 混淆頁面主題，造成關鍵字自相殘殺 (cannibalization)',
       'duplicate-description': '失去差異化 SERP 展示機會，CTR 無法最佳化',
       'crawlable-anchors': '重要頁面無法被爬取，自然流量永久流失',
       'img-missing-alt': '影響圖片搜尋流量與無障礙合規',
@@ -448,7 +448,7 @@ export function getExecLabels(locale: Locale): ExecLabels {
     basic: zh ? '📋 基本' : '📋 Basic',
     reportDate: zh ? '報告日期' : 'Report Date',
     totalPages: zh ? '分析頁面數' : 'Pages Analyzed',
-    elapsed: zh ? '耗時（秒）' : 'Elapsed (sec)',
+    elapsed: zh ? '耗時 (秒)' : 'Elapsed (sec)',
     lhSuccess: zh ? 'Lighthouse 成功頁數' : 'Lighthouse Success Pages',
     lhFailed: zh ? 'Lighthouse 失敗頁數' : 'Lighthouse Failed Pages',
     metaUnavailable: zh ? '元資料擷取失敗頁數' : 'Metadata Unavailable Pages',
@@ -471,7 +471,7 @@ export function getExecLabels(locale: Locale): ExecLabels {
     cwv: 'Core Web Vitals',
     seoAvg: zh ? 'SEO 平均' : 'SEO Avg',
     lhSeo: 'Lighthouse SEO',
-    perfRed: zh ? '效能紅燈（<50）' : 'Performance Red (<50)',
+    perfRed: zh ? '效能紅燈 (<50)' : 'Performance Red (<50)',
     needOpt: zh ? '需立即優化' : 'Needs immediate optimization',
     noRobots: zh ? '缺少 robots.txt' : 'Missing robots.txt',
     noSitemap: zh ? '缺少 sitemap' : 'Missing sitemap',
@@ -480,7 +480,7 @@ export function getExecLabels(locale: Locale): ExecLabels {
     p2Section: zh ? '📝 P2 內容層' : '📝 P2 Content',
     noDesc: zh ? '缺少 Description' : 'Missing Description',
     noH1: zh ? '缺少 H1' : 'Missing H1',
-    thinContent: zh ? '內容過薄（<300字）' : 'Thin Content (<300 words)',
+    thinContent: zh ? '內容過薄 (<300字)' : 'Thin Content (<300 words)',
     dupTitle: zh ? '重複 Title 頁面數' : 'Duplicate Title Pages',
     cannibalization: zh ? '關鍵字自相殘殺' : 'Keyword cannibalization',
     dupDesc: zh ? '重複 Desc 頁面數' : 'Duplicate Desc Pages',
@@ -505,25 +505,25 @@ export function getGlossaryData(locale: Locale): string[][] {
   if (locale === 'zh') {
     return [
       ['🏷️ 優先度', '🚨 P0 索引層', '最高優先。決定 Google「能不能找到你的頁面」。如果 P0 有問題，這個頁面等於不存在於搜尋結果中，其他所有優化都沒有意義。'],
-      ['🏷️ 優先度', '🔧 P1 技術層', '高優先。決定 Google「願不願意給你好排名」。包含網站速度（Core Web Vitals）和基礎技術設定，直接影響排名高低。'],
-      ['🏷️ 優先度', '📝 P2 內容層', '中優先。決定「使用者搜尋時會不會點進來」。包含標題、描述、內容品質，影響搜尋結果的點擊率（CTR）。'],
+      ['🏷️ 優先度', '🔧 P1 技術層', '高優先。決定 Google「願不願意給你好排名」。包含網站速度 (Core Web Vitals)和基礎技術設定，直接影響排名高低。'],
+      ['🏷️ 優先度', '📝 P2 內容層', '中優先。決定「使用者搜尋時會不會點進來」。包含標題、描述、內容品質，影響搜尋結果的點擊率 (CTR)。'],
       ['🏷️ 優先度', '📎 P3 進階', '低優先。屬於加分項目，像是社群分享的顯示效果、結構化資料等。做了可以錦上添花，但不會直接影響排名。'],
       ['🏷️ 優先度', 'Critical / High / Medium / Low', '影響層級。Critical = 嚴重到可能讓頁面從搜尋結果消失；High = 明顯影響排名；Medium = 有感影響；Low = 微小影響。'],
       ['📄 報告檔案', 'URL 狀態', '所有爬取到的 URL 及其 HTTP 狀態碼、重導向目標，一目即可掌握全站 URL 健康度。'],
       ['📄 報告檔案', '主管摘要', '給主管看的一頁摘要。列出最關鍵的數字、最嚴重的問題、一句話結論、和預估需要投入多少資源修復。'],
-      ['📄 報告檔案', '高頻問題', '給 PM 或技術主管看的優先問題排行榜（最多 20 個）。依照 P0→P3 排序，每個問題附上影響範圍和建議解法。'],
+      ['📄 報告檔案', '高頻問題', '給 PM 或技術主管看的優先問題排行榜 (最多 20 個)。依照 P0→P3 排序，每個問題附上影響範圍和建議解法。'],
       ['📄 報告檔案', '問題明細', '給工程師看的完整問題清單。每一頁的每一個問題都列出來，包含具體的修復方式和預估影響。'],
       ['📄 報告檔案', '每頁數據', '每一頁的原始數據總覽。Lighthouse 分數、技術 SEO 狀態、On-page 資訊全部列在一起，方便交叉比對。'],
       ['📄 報告檔案', '術語解釋', '解釋報告中所有欄位和術語的意思。'],
       ['📄 報告檔案', 'Lighthouse狀態', '標示該頁面 Lighthouse 是否成功執行。若為「失敗」，分數欄位不應拿來做排序或平均判讀。'],
       ['📄 報告檔案', '元資料狀態', '標示該頁面 HTML 元資料是否成功擷取。若為「無法擷取」，On-page 規則不會套用，以避免誤判。'],
-      ['⚡ Core Web Vitals', 'LCP（Largest Contentful Paint）', '「最大內容繪製時間」。從使用者打開網頁到看到主要內容（大圖片或大標題）需要幾秒。Google 標準：≤ 2.5 秒合格，> 4 秒不合格。'],
-      ['⚡ Core Web Vitals', 'CLS（Cumulative Layout Shift）', '「累計版面偏移」。網頁載入時內容是否會亂跳。Google 標準：≤ 0.1 合格，> 0.25 不合格。'],
-      ['⚡ Core Web Vitals', 'TBT（Total Blocking Time）', '「總阻塞時間」。頁面載入過程中，JavaScript 卡住畫面多久。TBT 越長，使用者點東西越沒反應。TBT 是 INP 的實驗室替代指標。'],
-      ['⚡ Core Web Vitals', 'INP（Interaction to Next Paint）', '「互動到下一次繪製」。衡量使用者點擊/打字後，畫面多快有回應。Google 標準：≤ 200ms 合格，> 500ms 不合格。'],
-      ['⚡ Core Web Vitals', 'FCP（First Contentful Paint）', '「首次內容繪製」。打開網頁到畫面上出現第一個文字或圖片的時間。越快越好。'],
+      ['⚡ Core Web Vitals', 'LCP (Largest Contentful Paint)', '「最大內容繪製時間」。從使用者打開網頁到看到主要內容 (大圖片或大標題) 需要幾秒。Google 標準：≤ 2.5 秒合格，> 4 秒不合格。'],
+      ['⚡ Core Web Vitals', 'CLS (Cumulative Layout Shift)', '「累計版面偏移」。網頁載入時內容是否會亂跳。Google 標準：≤ 0.1 合格，> 0.25 不合格。'],
+      ['⚡ Core Web Vitals', 'TBT (Total Blocking Time)', '「總阻塞時間」。頁面載入過程中，JavaScript 卡住畫面多久。TBT 越長，使用者點東西越沒反應。TBT 是 INP 的實驗室替代指標。'],
+      ['⚡ Core Web Vitals', 'INP (Interaction to Next Paint)', '「互動到下一次繪製」。衡量使用者點擊/打字後，畫面多快有回應。Google 標準：≤ 200ms 合格，> 500ms 不合格。'],
+      ['⚡ Core Web Vitals', 'FCP (First Contentful Paint)', '「首次內容繪製」。打開網頁到畫面上出現第一個文字或圖片的時間。越快越好。'],
       ['⚡ Core Web Vitals', 'Speed Index', '「速度指數」。衡量頁面可見內容填滿的平均速度。數字越小越好。'],
-      ['🔧 技術 SEO', 'HTTPS', '網站有沒有使用加密連線（https://）。Google 明確表示 HTTPS 是排名因素。'],
+      ['🔧 技術 SEO', 'HTTPS', '網站有沒有使用加密連線 (https://)。Google 明確表示 HTTPS 是排名因素。'],
       ['🔧 技術 SEO', 'robots.txt', '告訴 Google 爬蟲「哪些頁面可以爬、哪些不要爬」的文字檔。'],
       ['🔧 技術 SEO', 'Sitemap', 'XML 格式的「網站地圖」。主動告訴 Google 你的網站有哪些頁面。'],
       ['🔧 技術 SEO', 'Canonical', '<link rel="canonical"> 標籤。告訴 Google 這一頁的正式版本網址是什麼。'],
@@ -531,7 +531,7 @@ export function getGlossaryData(locale: Locale): string[][] {
       ['🔧 技術 SEO', 'Viewport', '<meta name="viewport"> 標籤。告訴手機瀏覽器網頁有做行動端適配。'],
       ['🔧 技術 SEO', 'Lang', 'HTML 的 lang 屬性。告訴 Google 頁面是什麼語言。'],
       ['🔧 技術 SEO', 'hreflang', '告訴 Google 頁面有其他語言版本的標籤。'],
-      ['🔧 技術 SEO', 'Schema 類型', 'Schema.org 結構化資料（JSON-LD 格式），可觸發 Rich Snippet。'],
+      ['🔧 技術 SEO', 'Schema 類型', 'Schema.org 結構化資料 (JSON-LD 格式)，可觸發 Rich Snippet。'],
       ['📝 On-page SEO', 'Title / Title字元數', '<title> 標籤，是 Google 搜尋結果中最醒目的藍色連結文字。建議 30-60 字元。'],
       ['📝 On-page SEO', 'Description / Description字元數', 'meta description，Google 搜尋結果標題下方的灰色說明文字。建議 50-160 字元。'],
       ['📝 On-page SEO', 'H1數量 / H1內容', '一級標題 <h1>。每頁應只有一個 H1，且包含核心關鍵字。'],
