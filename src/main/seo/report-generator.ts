@@ -68,46 +68,70 @@ export async function generateExcelReport(urlStatusData: UrlStatusEntry[] | null
   const dupDescs = detectDuplicates(analysisResults, (r) => r.meta?.description)
 
   /** ========================= Sheet 1: URL Status ========================= */
-  const ws1 = wb.addWorksheet(sheetNames.urlStatus)
-  const h1 = getUrlStatusHeaders(locale)
-  ws1.addRow(h1)
-  if (urlStatusData) {
-    for (const entry of urlStatusData) {
-      ws1.addRow([
-        entry.url,
-        entry.status ?? labels_noData(locale),
-        entry.redirectTo ?? '',
-        entry.label
-      ])
+  try {
+    const ws1 = wb.addWorksheet(sheetNames.urlStatus)
+    const h1 = getUrlStatusHeaders(locale)
+    ws1.addRow(h1)
+    if (urlStatusData) {
+      for (const entry of urlStatusData) {
+        ws1.addRow([
+          entry.url,
+          entry.status ?? labels_noData(locale),
+          entry.redirectTo ?? '',
+          entry.label
+        ])
+      }
     }
+    styleHeaderRow(ws1, h1.length)
+    autoWidth(ws1, h1, 80)
+    ws1.getColumn(1).width = 60
+  } catch (e) {
+    console.error('[report] Sheet 1 (URL Status) generation failed:', (e as Error).message)
   }
-  styleHeaderRow(ws1, h1.length)
-  autoWidth(ws1, h1, 80)
-  ws1.getColumn(1).width = 60
 
   /** ========================= Sheet 2: Executive Summary ========================= */
-  generateExecSummarySheet(wb, sheetNames.executiveSummary, analysisResults, dupTitles, dupDescs, locale, reportDate, analysisDurationMs)
+  try {
+    generateExecSummarySheet(wb, sheetNames.executiveSummary, analysisResults, dupTitles, dupDescs, locale, reportDate, analysisDurationMs)
+  } catch (e) {
+    console.error('[report] Sheet 2 (Executive Summary) generation failed:', (e as Error).message)
+  }
 
   /** ========================= Sheet 3: Top Issues ========================= */
-  generateTopIssuesSheet(wb, sheetNames.topIssues, analysisResults, locale, solutionMap, businessMap, dupTitles, dupDescs)
+  try {
+    generateTopIssuesSheet(wb, sheetNames.topIssues, analysisResults, locale, solutionMap, businessMap, dupTitles, dupDescs)
+  } catch (e) {
+    console.error('[report] Sheet 3 (Top Issues) generation failed:', (e as Error).message)
+  }
 
   /** ========================= Sheet 4: Issue Details ========================= */
-  generateIssuesSheet(wb, sheetNames.issues, analysisResults, dupTitles, dupDescs, locale, labels, solutionMap, businessMap)
+  try {
+    generateIssuesSheet(wb, sheetNames.issues, analysisResults, dupTitles, dupDescs, locale, labels, solutionMap, businessMap)
+  } catch (e) {
+    console.error('[report] Sheet 4 (Issue Details) generation failed:', (e as Error).message)
+  }
 
   /** ========================= Sheet 5: Page Data ========================= */
-  generatePageDataSheet(wb, sheetNames.pageData, analysisResults, locale, reportDate)
+  try {
+    generatePageDataSheet(wb, sheetNames.pageData, analysisResults, locale, reportDate)
+  } catch (e) {
+    console.error('[report] Sheet 5 (Page Data) generation failed:', (e as Error).message)
+  }
 
   /** ========================= Sheet 6: Glossary ========================= */
-  const ws6 = wb.addWorksheet(sheetNames.glossary)
-  const h6 = getGlossaryHeaders(locale)
-  ws6.addRow(h6)
-  for (const row of getGlossaryData(locale)) {
-    ws6.addRow(row)
+  try {
+    const ws6 = wb.addWorksheet(sheetNames.glossary)
+    const h6 = getGlossaryHeaders(locale)
+    ws6.addRow(h6)
+    for (const row of getGlossaryData(locale)) {
+      ws6.addRow(row)
+    }
+    styleHeaderRow(ws6, h6.length)
+    ws6.getColumn(1).width = 20
+    ws6.getColumn(2).width = 35
+    ws6.getColumn(3).width = 80
+  } catch (e) {
+    console.error('[report] Sheet 6 (Glossary) generation failed:', (e as Error).message)
   }
-  styleHeaderRow(ws6, h6.length)
-  ws6.getColumn(1).width = 20
-  ws6.getColumn(2).width = 35
-  ws6.getColumn(3).width = 80
 
   // Return buffer
   const buffer = await wb.xlsx.writeBuffer()
@@ -179,7 +203,7 @@ function generatePageDataSheet( wb: ExcelJS.Workbook, sheetName: string, results
 }
 
 function labels_noData(locale: Locale): string {
-  return locale === 'zh' ? '（無）' : '(N/A)'
+  return locale === 'zh' ? '(無)' : '(N/A)'
 }
 
 function labels_lighthouseSuccess(locale: Locale): string {
@@ -299,16 +323,16 @@ function generateIssuesSheet(wb: ExcelJS.Workbook, sheetName: string, results: A
     const wordCount = (m as { wordCount?: number }).wordCount ?? 999
 
     const p2Issues: [boolean, string, string, string][] = [
-      [!!metaObj.title && titleLen < 10, 'title-too-short', `Title ${locale === 'zh' ? '過短' : 'too short'}（${titleLen}）`, locale === 'zh' ? '關鍵字訊號不足' : 'Insufficient keyword signals'],
-      [titleLen > 60, 'title-too-long', `Title ${locale === 'zh' ? '過長' : 'too long'}（${titleLen}）`, locale === 'zh' ? 'Google 截斷影響 CTR' : 'Truncated by Google, impacts CTR'],
+      [!!metaObj.title && titleLen < 10, 'title-too-short', `Title ${locale === 'zh' ? '過短' : 'too short'} (${titleLen})`, locale === 'zh' ? '關鍵字訊號不足' : 'Insufficient keyword signals'],
+      [titleLen > 60, 'title-too-long', `Title ${locale === 'zh' ? '過長' : 'too long'} (${titleLen})`, locale === 'zh' ? 'Google 截斷影響 CTR' : 'Truncated by Google, impacts CTR'],
       [!descMeta.description, 'missing-description', locale === 'zh' ? '缺少 Meta Description' : 'Missing Meta Description', locale === 'zh' ? 'CTR 下降 5-10%' : 'CTR drops 5-10%'],
-      [!!descMeta.description && descLen < 50, 'desc-too-short', `Description ${locale === 'zh' ? '過短' : 'too short'}（${descLen}）`, locale === 'zh' ? '說明不完整' : 'Incomplete description'],
-      [descLen > 160, 'desc-too-long', `Description ${locale === 'zh' ? '過長' : 'too long'}（${descLen}）`, locale === 'zh' ? 'SERP 被截斷' : 'Truncated in SERP'],
+      [!!descMeta.description && descLen < 50, 'desc-too-short', `Description ${locale === 'zh' ? '過短' : 'too short'} (${descLen})`, locale === 'zh' ? '說明不完整' : 'Incomplete description'],
+      [descLen > 160, 'desc-too-long', `Description ${locale === 'zh' ? '過長' : 'too long'} (${descLen})`, locale === 'zh' ? 'SERP 被截斷' : 'Truncated in SERP'],
       [h1Count === 0, 'missing-h1', locale === 'zh' ? '缺少 H1 標題' : 'Missing H1 heading', locale === 'zh' ? '主題訊號缺失' : 'Topic signals missing'],
-      [h1Count > 1, 'multiple-h1', `H1 ${locale === 'zh' ? '過多' : 'too many'}（${h1Count}）`, locale === 'zh' ? '主題訊號分散' : 'Topic signals diluted'],
+      [h1Count > 1, 'multiple-h1', `H1 ${locale === 'zh' ? '過多' : 'too many'} (${h1Count})`, locale === 'zh' ? '主題訊號分散' : 'Topic signals diluted'],
       [h2Count === 0, 'missing-h2', locale === 'zh' ? '缺少 H2 標題' : 'Missing H2 headings', locale === 'zh' ? '內容結構不清晰' : 'Unclear content structure'],
       [imgNoAlt > 0, 'img-missing-alt', `${imgNoAlt} ${locale === 'zh' ? '張圖片缺少 alt' : 'images missing alt'}`, locale === 'zh' ? '圖片搜尋流量損失' : 'Image search traffic loss'],
-      [wordCount < 300, 'thin-content', `${locale === 'zh' ? '內容過薄' : 'Thin content'}（${wordCount} ${locale === 'zh' ? '字' : 'words'}）`, locale === 'zh' ? 'Google 低品質判定' : 'Google low-quality assessment']
+      [wordCount < 300, 'thin-content', `${locale === 'zh' ? '內容過薄' : 'Thin content'} (${wordCount} ${locale === 'zh' ? '字' : 'words'})`, locale === 'zh' ? 'Google 低品質判定' : 'Google low-quality assessment']
     ]
     for (const [cond, id, title, desc] of p2Issues) {
       if (!cond) continue
@@ -482,7 +506,7 @@ function generateExecSummarySheet(wb: ExcelJS.Workbook, sheetName: string, resul
   const mv = metaValid.length
   const metaUnavailableCount = total - mv
   const cnt = (pred: (r: AnalysisResult) => boolean): number => metaValid.filter(pred).length
-  const pct2 = (n: number, base = total): string => locale === 'zh' ? `${n} / ${base}（${base > 0 ? Math.round((n / base) * 100) : 0}%）` : `${n} / ${base} (${base > 0 ? Math.round((n / base) * 100) : 0}%)`
+  const pct2 = (n: number, base = total): string => locale === 'zh' ? `${n} / ${base} (${base > 0 ? Math.round((n / base) * 100) : 0}%)` : `${n} / ${base} (${base > 0 ? Math.round((n / base) * 100) : 0}%)`
   const noHttps = results.filter((r) => !r.tech?.isHttps).length
   const noCanon = cnt((r) => !r.meta?.canonical)
   const hasNoIdx = cnt((r) => !!r.meta?.robots?.includes('noindex'))
@@ -506,7 +530,7 @@ function generateExecSummarySheet(wb: ExcelJS.Workbook, sheetName: string, resul
       if (a.score !== 1 && a.score != null && !['notApplicable', 'manual', 'informative'].includes(a.scoreDisplayMode)) freq[a.title] = (freq[a.title] || 0) + 1
     })
   })
-  const top5 = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([t, c]) => locale === 'zh' ? `${t}（${c}頁）` : `${t} (${c} pages)`).join(locale === 'zh' ? '；' : '; ')
+  const top5 = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([t, c]) => locale === 'zh' ? `${t} (${c}頁)` : `${t} (${c} pages)`).join(locale === 'zh' ? '；' : '; ')
   const withPerf = results.filter((r) => r.lhr?.categories?.performance?.score != null)
   const withSeo = results.filter((r) => r.lhr?.categories?.seo?.score != null)
   const best = withPerf.length ? withPerf.reduce((a, b) => (a.lhr!.categories.performance.score ?? 0) > (b.lhr!.categories.performance.score ?? 0) ? a : b).url : '-'
@@ -543,12 +567,12 @@ function generateExecSummarySheet(wb: ExcelJS.Workbook, sheetName: string, resul
         : '🔴 Lighthouse failed on every page. Fix the execution environment, Chrome availability, or site accessibility before interpreting the report.')
     : locale === 'zh'
       ? (p0Total > 0
-          ? `🔴 發現 ${p0Total} 個 P0 緊急問題（Indexing 層），直接阻擋 Google 索引，需立即修復。${coverageWarning ? ` ${coverageWarning}` : ''}`
+          ? `🔴 發現 ${p0Total} 個 P0 緊急問題 (Indexing 層)，直接阻擋 Google 索引，需立即修復。${coverageWarning ? ` ${coverageWarning}` : ''}`
           : avgPerf != null && avgPerf < 50
-            ? `🔴 整體效能偏弱（平均 ${avgPerf}），LCP 與 JS 阻塞嚴重，建議優先優化前端載入策略。${coverageWarning ? ` ${coverageWarning}` : ''}`
+            ? `🔴 整體效能偏弱 (平均 ${avgPerf})，LCP 與 JS 阻塞嚴重，建議優先優化前端載入策略。${coverageWarning ? ` ${coverageWarning}` : ''}`
             : avgPerf != null && avgPerf < 75
-              ? `🟡 整體效能中等（平均 ${avgPerf}），建議處理 LCP、未使用 JS 及缺失的 Schema。${coverageWarning ? ` ${coverageWarning}` : ''}`
-              : `🟢 整體效能良好（平均 ${avgPerf}），維持現有水準，持續監控 CLS 與 INP。${coverageWarning ? ` ${coverageWarning}` : ''}`)
+              ? `🟡 整體效能中等 (平均 ${avgPerf})，建議處理 LCP、未使用 JS 及缺失的 Schema。${coverageWarning ? ` ${coverageWarning}` : ''}`
+              : `🟢 整體效能良好 (平均 ${avgPerf})，維持現有水準，持續監控 CLS 與 INP。${coverageWarning ? ` ${coverageWarning}` : ''}`)
       : (p0Total > 0
           ? `🔴 Found ${p0Total} P0 critical issues (Indexing layer) directly blocking Google indexing. Fix immediately.${coverageWarning ? ` ${coverageWarning}` : ''}`
           : avgPerf != null && avgPerf < 50
