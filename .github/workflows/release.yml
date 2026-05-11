@@ -93,7 +93,7 @@ jobs:
   # ────────────────────────────────────────────────────────────────────────────
   build-mac-x64:
     name: Build (macOS x64)
-    runs-on: macos-13   # GitHub's Intel Mac runner
+    runs-on: macos-latest  # Apple Silicon runner; cross-compiles x64 via --x64 flag
 
     steps:
       - name: Checkout
@@ -110,9 +110,9 @@ jobs:
         id: puppeteer-cache-mac-x64
         with:
           path: .puppeteer-cache
-          key: puppeteer-chrome-mac-x64-${{ hashFiles('.puppeteerrc.cjs') }}-${{ hashFiles('package-lock.json') }}
+          key: puppeteer-chrome-mac-x64-cross-${{ hashFiles('.puppeteerrc.cjs') }}-${{ hashFiles('package-lock.json') }}
           restore-keys: |
-            puppeteer-chrome-mac-x64-${{ hashFiles('.puppeteerrc.cjs') }}-
+            puppeteer-chrome-mac-x64-cross-${{ hashFiles('.puppeteerrc.cjs') }}-
 
       - name: Install dependencies
         run: npm ci
@@ -124,7 +124,7 @@ jobs:
         run: npx puppeteer browsers install chrome
 
       - name: Build macOS x64 DMG
-        run: npm run build:mac
+        run: npm run build && electron-builder --mac --x64
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
