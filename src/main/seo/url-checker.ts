@@ -16,7 +16,22 @@ async function checkUrlStatus(
   let page: import('puppeteer').Page | null = null
   try {
     page = await browser.newPage()
-    
+
+    // Suppress console noise coming from target pages
+    page.on('console', () => {})
+    page.on('pageerror', () => {})
+
+    // Block heavy resources — we only need the HTTP response status
+    await page.setRequestInterception(true)
+    page.on('request', (req) => {
+      const type = req.resourceType()
+      if (type === 'font' || type === 'image' || type === 'media' || type === 'stylesheet') {
+        req.abort()
+      } else {
+        req.continue()
+      }
+    })
+
     // Set a reasonable user agent
     try {
       const client = await page.createCDPSession()
@@ -111,7 +126,8 @@ export async function checkUrlStatuses(
       '--disable-dev-shm-usage',
       '--disable-gpu',
       '--mute-audio',
-      '--hide-scrollbars'
+      '--hide-scrollbars',
+      '--log-level=3',
     ]
   })
 

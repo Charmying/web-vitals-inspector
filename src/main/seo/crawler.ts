@@ -209,6 +209,9 @@ async function fetchWaybackUrls(domain: string, rootUrl: string, rootHostNoWww: 
 async function fetchSearchEngineUrls(browser: Browser, engine: 'google' | 'bing', domain: string, rootUrl: string, rootHostNoWww: string, analyzer: ParamAnalyzer): Promise<Set<string>> {
   const urls = new Set<string>()
   const page = await browser.newPage()
+  // Suppress console noise from search engine pages
+  page.on('console', () => {})
+  page.on('pageerror', () => {})
   try {
     const client = await page.createCDPSession()
     await client.send('Network.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36' })
@@ -353,13 +356,13 @@ export async function crawlUrls(rootUrl: string, onProgress: (p: CrawlProgress) 
     executablePath: getChromePath() || undefined,
     args: [
       '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-      '--disable-gpu', '--mute-audio', '--hide-scrollbars'
+      '--disable-gpu', '--mute-audio', '--hide-scrollbars', '--log-level=3',
     ]
   })
 
   try {
     // Phase 1: Seed collection
-    onProgress({ phase: 'seeds', current: 0, total: 4, message: locale === 'zh' ? '收集種子 URL（Sitemap）...' : 'Collecting seed URLs (Sitemap)...' })
+    onProgress({ phase: 'seeds', current: 0, total: 4, message: locale === 'zh' ? '收集種子 URL (Sitemap)...' : 'Collecting seed URLs (Sitemap)...' })
 
     const [sitemapUrls, waybackUrls] = await Promise.all([
       fetchSitemapUrls(ROOT_URL, ROOT_HOST_NO_WWW, analyzer),
@@ -368,7 +371,7 @@ export async function crawlUrls(rootUrl: string, onProgress: (p: CrawlProgress) 
 
     if (abortSignal?.aborted) throw new Error('Aborted')
 
-    onProgress({ phase: 'seeds', current: 2, total: 4, message: locale === 'zh' ? '搜尋引擎種子（Google/Bing）...' : 'Collecting seeds from search engines (Google/Bing)...' })
+    onProgress({ phase: 'seeds', current: 2, total: 4, message: locale === 'zh' ? '搜尋引擎種子 (Google/Bing)...' : 'Collecting seeds from search engines (Google/Bing)...' })
 
     const [googleUrls, bingUrls] = await Promise.all([
       fetchSearchEngineUrls(browser, 'google', DOMAIN, ROOT_URL, ROOT_HOST_NO_WWW, analyzer),
@@ -400,6 +403,9 @@ export async function crawlUrls(rootUrl: string, onProgress: (p: CrawlProgress) 
     const crawlPages: Page[] = []
     for (let i = 0; i < CONCURRENCY; i++) {
       const p = await browser.newPage()
+      // Suppress console noise from crawled pages (CORS errors, framework warnings, etc.)
+      p.on('console', () => {})
+      p.on('pageerror', () => {})
       try {
         const client = await p.createCDPSession()
         await client.send('Network.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (compatible; SEO-Crawler/6.0)' })
