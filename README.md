@@ -10,15 +10,19 @@ A professional desktop application for auditing website SEO and Core Web Vitals 
 
 ## 📥 Downloads
 
-We provide optimized stable builds for both Windows and macOS. Click a badge below to download the latest version for your system:
+Pre-built installers are published automatically on every tagged release via GitHub Actions.
+Click a badge to download the latest version for your platform:
 
-| Windows | macOS |
+| Platform | Download |
 | :---: | :---: |
-| [![Windows](https://img.shields.io/badge/下載-Windows-0078D4?style=for-the-badge)](https://github.com/Charmying/web-vitals-inspector/releases/latest/download/web-vitals-inspector-windows.exe) | [![macOS](https://img.shields.io/badge/下載-macOS-000000?style=for-the-badge)](https://github.com/Charmying/web-vitals-inspector/releases/latest/download/web-vitals-inspector-mac.dmg) |
+| Windows | [![Windows](https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows)](https://github.com/Charmying/web-vitals-inspector/releases/latest) |
+| macOS (Apple Silicon) | [![macOS arm64](https://img.shields.io/badge/Download-macOS_arm64-000000?style=for-the-badge&logo=apple)](https://github.com/Charmying/web-vitals-inspector/releases/latest) |
+| macOS (Intel) | [![macOS x64](https://img.shields.io/badge/Download-macOS_x64-000000?style=for-the-badge&logo=apple)](https://github.com/Charmying/web-vitals-inspector/releases/latest) |
 
-### **💡 Installation Notes:**
-- **Windows:** If prompted by SmartScreen, click **"More info"** and select **"Run anyway"** to proceed.
-- **macOS:** After downloading, drag the application to your **Applications** folder. If you encounter an "Unverified Developer" warning, navigate to **System Settings > Privacy & Security** and click **"Open Anyway"** to bypass the check.
+### **💡 Installation Notes**
+- **Windows:** If SmartScreen appears, click **"More info" → "Run anyway"**.
+- **macOS:** Drag the app to **Applications**. If "Unverified Developer" appears, go to
+  **System Settings → Privacy & Security** and click **"Open Anyway"**.
 
 ---
 
@@ -31,6 +35,8 @@ We provide optimized stable builds for both Windows and macOS. Click a badge bel
 - **6-Sheet Excel Report** — URL Status, Executive Summary, Top Issues, Issue Details, Page Data, and Glossary
 - **Bilingual** — UI and reports support English and Traditional Chinese
 - **Dark / Light Theme** — Persistent theme preference
+- **Memory-Safe Architecture** — Chrome Pool keeps exactly 3 Chrome instances alive; recycles every 25 uses and force-kills OS process trees to prevent crashes on 300+ URL runs
+- **1000+ URL Ready** — Main-process analysis automatically runs in chunks for large batches (default 200 URLs/chunk), with GC between chunks to keep long runs stable
 
 ---
 
@@ -62,9 +68,14 @@ npm run dev
 
 ```bash
 npm run build:win     # Windows installer (.exe)
-npm run build:mac     # macOS disk image (.dmg)
+npm run build:mac     # macOS disk image (.dmg, requires macOS host)
 npm run build:linux   # AppImage / deb / snap
 ```
+
+Platform notes:
+- `build:mac` can run only on macOS (Electron Builder limitation).
+- `build:win` is verified on Windows and in CI.
+- For cross-platform public binaries, use the release workflow (below).
 
 ---
 
@@ -91,3 +102,61 @@ npm run build:linux   # AppImage / deb / snap
 | Auditing | Lighthouse CLI |
 | Reports | ExcelJS |
 | HTTP | Axios |
+
+---
+
+## CI / CD
+
+Two GitHub Actions workflows are included:
+
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `ci.yml` | Push / PR to `main`, `develop` | Type-check + ESLint |
+| `release.yml` | Push a semver tag `v*.*.*` | Build Win + macOS (x64 & arm64) and publish GitHub Release |
+| `verification.yml` | Manual dispatch | Run macOS `build:mac` + DMG installability check and Windows 300+ URL stress test |
+
+To publish a new release, tag and push:
+
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+GitHub Actions will automatically build all platforms and attach installers to a new GitHub Release.
+
+Manual fallback (no tag push required):
+- Open the Actions tab, run `Build and Release`, and provide `version` (for example `1.2.3`).
+
+Full verification fallback:
+- Open Actions, run `Verification` to execute:
+- macOS host build (`npm run build:mac`) + DMG mount/signature verification
+- Windows 320-URL analyzer stress test with report artifact upload
+
+Local 300+ stress test (Windows):
+```bash
+# Terminal A
+npm run stress:mock-site
+
+# Terminal B
+npm run stress:prepare-urls
+npm run stress:analyzer -- --urls-file=scripts/stress/generated-urls.txt --report-dir=reports/stress --label=local-320
+```
+
+Local 1000+ stress test with resume support (recommended):
+```bash
+# Terminal A
+npm run stress:mock-site
+
+# Terminal B
+npm run stress:prepare-urls -- --count=1200
+npm run stress:analyzer -- --urls-file=scripts/stress/generated-urls.txt --report-dir=reports/stress --label=local-1200 --chunk-size=200
+
+# If interrupted, resume from checkpoint
+npm run stress:analyzer:resume -- --urls-file=scripts/stress/generated-urls.txt --report-dir=reports/stress --label=local-1200 --chunk-size=200
+```
+
+Notes:
+- A checkpoint file is saved at `reports/stress/<label>.checkpoint.json` after every chunk.
+- Resume mode skips only URLs that already produced a successful Lighthouse result.
+- `npm run stress:mock-site` now serves dynamic `/page/<n>` routes, so 1000+ generated URLs are backed by real pages instead of overflowing a 360-page fixture.
+- Use `Verification` workflow input `stress_url_count` (for example `1200`) to validate high-volume runs in CI.

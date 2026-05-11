@@ -10,15 +10,19 @@
 
 ## 📥 程式下載
 
-我們為不同平台提供經過優化的穩定版本。點擊下方按鈕即可下載適合您系統的版本：
+每次打上 semver tag 後，GitHub Actions 會自動編譯並發布安裝檔。
+點擊下方按鈕即可前往最新 Release 下載：
 
-| Windows | macOS |
+| 平台 | 下載 |
 | :---: | :---: |
-| [![Windows](https://img.shields.io/badge/下載-Windows-0078D4?style=for-the-badge)](https://github.com/web-vitals-inspector/web-vitals-inspector/releases/latest/download/web-vitals-inspector-windows.exe) | [![macOS](https://img.shields.io/badge/下載-macOS-000000?style=for-the-badge)](https://github.com/web-vitals-inspector/web-vitals-inspector/releases/latest/download/web-vitals-inspector-mac.dmg) |
+| Windows | [![Windows](https://img.shields.io/badge/下載-Windows-0078D4?style=for-the-badge&logo=windows)](https://github.com/Charmying/web-vitals-inspector/releases/latest) |
+| macOS (Apple Silicon) | [![macOS arm64](https://img.shields.io/badge/下載-macOS_arm64-000000?style=for-the-badge&logo=apple)](https://github.com/Charmying/web-vitals-inspector/releases/latest) |
+| macOS (Intel) | [![macOS x64](https://img.shields.io/badge/下載-macOS_x64-000000?style=for-the-badge&logo=apple)](https://github.com/Charmying/web-vitals-inspector/releases/latest) |
 
-### **💡 安裝提示：**
-- **Windows:** 若出現 SmartScreen 警告，請點擊 **「其他資訊」** 並選擇 **「仍要執行」**。
-- **macOS:** 下載後請將應用程式拖移至 **Applications** 檔案夾。若提示「無法驗證開發者」，請至 **系統設定 > 安全性與隱私權** 點擊 **「仍要開啟」** 以繞過檢查。
+### **💡 安裝提示**
+- **Windows:** 若出現 SmartScreen 警告，請點擊 **「其他資訊」→「仍要執行」**。
+- **macOS:** 下載後將 App 拖移至 **Applications** 資料夾。若提示「無法驗證開發者」，請至
+  **系統設定 → 安全性與隱私權** 點擊 **「仍要開啟」**。
 
 ---
 
@@ -31,6 +35,8 @@
 - **6 工作表 Excel 報告** — URL 狀態、執行摘要、主要問題、問題明細、頁面資料、名詞解釋
 - **雙語支援** — UI 與報告皆支援中文與英文
 - **深色 / 淺色主題** — 主題偏好持久化儲存
+- **記憶體安全架構** — Chrome Pool 精確維護 3 個 Chrome 實例，每 25 次分析後強制回收進程樹，徹底防止 300+ URL 執行時當機
+- **支援 1000+ URL** — 大批次分析會自動分段執行 (預設每段 200 URLs)，並在段落間觸發 GC，確保長時間任務穩定
 
 ---
 
@@ -62,9 +68,14 @@ npm run dev
 
 ```bash
 npm run build:win     # Windows 安裝程式 (.exe)
-npm run build:mac     # macOS 磁碟映像 (.dmg)
+npm run build:mac     # macOS 磁碟映像 (.dmg，需在 macOS 主機執行)
 npm run build:linux   # AppImage / deb / snap
 ```
+
+平台說明：
+- `build:mac` 只能在 macOS 執行 (Electron Builder 限制)。
+- `build:win` 已在 Windows 與 CI 驗證可用。
+- 若要一次產出跨平台可下載安裝檔，請使用下方 release workflow。
 
 ---
 
@@ -91,3 +102,61 @@ npm run build:linux   # AppImage / deb / snap
 | 效能審計 | Lighthouse CLI |
 | 報告產生 | ExcelJS |
 | HTTP 請求 | Axios |
+
+---
+
+## CI / CD
+
+專案包含兩個 GitHub Actions 工作流程：
+
+| 工作流程 | 觸發條件 | 用途 |
+|----------|---------|------|
+| `ci.yml` | 推送或 PR 至 `main`、`develop` | TypeScript 型別檢查 + ESLint |
+| `release.yml` | 推送 semver tag `v*.*.*` | 編譯 Win + macOS (x64 & arm64) 並發布 GitHub Release |
+| `verification.yml` | 手動觸發 | 在 macOS 主機執行 `build:mac` + DMG 可安裝性驗證，並執行 Windows 300+ URL 壓測 |
+
+發布新版本只需打 tag：
+
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+GitHub Actions 會自動為所有平台編譯安裝檔並附加至新的 GitHub Release。
+
+手動備援 (不推 tag 也可發版)：
+- 到 Actions 執行 `Build and Release`，輸入 `version` (例如 `1.2.3`)。
+
+完整驗證流程 (手動)：
+- 到 Actions 執行 `Verification`，會自動跑：
+- macOS 主機實跑 `npm run build:mac` + DMG 掛載/簽章檢查
+- Windows 320 URL 分析壓測，並上傳報告 artifact
+
+本機 300+ 壓測 (Windows)：
+```bash
+# 終端 A
+npm run stress:mock-site
+
+# 終端 B
+npm run stress:prepare-urls
+npm run stress:analyzer -- --urls-file=scripts/stress/generated-urls.txt --report-dir=reports/stress --label=local-320
+```
+
+本機 1000+ 壓測 (建議，含續跑)：
+```bash
+# 終端 A
+npm run stress:mock-site
+
+# 終端 B
+npm run stress:prepare-urls -- --count=1200
+npm run stress:analyzer -- --urls-file=scripts/stress/generated-urls.txt --report-dir=reports/stress --label=local-1200 --chunk-size=200
+
+# 若中斷，可從 checkpoint 續跑
+npm run stress:analyzer:resume -- --urls-file=scripts/stress/generated-urls.txt --report-dir=reports/stress --label=local-1200 --chunk-size=200
+```
+
+說明：
+- 每個分段完成後會寫入 checkpoint：`reports/stress/<label>.checkpoint.json`。
+- 續跑模式只會略過已成功產生 Lighthouse 結果的 URL。
+- `npm run stress:mock-site` 現在會提供動態 `/page/<n>` 路由，因此 1000+ 產生 URL 不會再溢出舊的 360 頁測試夾具。
+- 可在 `Verification` workflow 輸入 `stress_url_count` (例如 `1200`) 驗證大流量場景。
